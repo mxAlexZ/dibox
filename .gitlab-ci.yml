@@ -10,30 +10,68 @@ image: ghcr.io/astral-sh/uv:$UV_VERSION-python$PYTHON_VERSION-$BASE_LAYER
 cache:
   key:
     files:
-        - uv.lock
+      - uv.lock
   paths:
     - $UV_CACHE_DIR
 
 stages:
   - test
 
-before_script:
-    - uv sync
+before_script: &before_script
+  - uv sync
 
-after_script:
-    - uv cache prune --ci
+after_script: &after_script
+  - uv cache prune --ci
+
+.rule_templates:
+  merge_request: &merge_request
+    if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  main_branch: &main_branch
+    if: $CI_COMMIT_BRANCH == "main"
 
 unit-tests:
   stage: test
   script:
     - uv run pytest tests --junitxml=test_report.xml
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "main"
+    - *main_branch
+    - *merge_request
   artifacts:
     when: always
     reports:
       junit: test_report.xml
-    paths:
-      - test_report.xml
-    expire_in: 1 week
+    expire_in: 2 days
+
+ruff-lint:
+  stage: test
+  allow_failure: true
+  script:
+    - uvx ruff check --output-format=gitlab | tee ruff_report.json
+  rules:
+    - *merge_request
+  artifacts:
+    when: always
+    reports:
+      codequality: ruff_report.json
+    expire_in: 2 days
+
+pyright:
+  stage: test
+  allow_failure: true
+  before_script:
+    - *before_script
+    - apt-get update
+    - apt-get install -y libatomic1
+  script:
+    - source .venv/bin/activate
+    - uvx pyright --outputjson | tee report_raw.json
+  after_script:
+    - uvx pyright-to-gitlab-ci --src report_raw.json --output pyright_report.json --base_path .
+    - *after_script
+  rules:
+    - *merge_request
+  artifacts:
+    when: always
+    reports:
+      codequality: pyright_report.json
+    expire_in: 2 days
