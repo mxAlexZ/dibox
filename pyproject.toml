@@ -1,7 +1,10 @@
 [project]
 name = "dibox"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.1.1.dev2"
+description = "Dependency injection framework for Python with auto wiring and context management."
+authors = [
+    {name = "Alex Zee", email = "alex.zee@outlook.cz"},
+]
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
@@ -27,3 +30,9 @@ line-length = 125
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
+
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true

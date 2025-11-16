@@ -16,6 +16,8 @@ cache:
 
 stages:
   - test
+  - build
+  - publish
 
 before_script: &before_script
   - uv sync
@@ -79,3 +81,28 @@ pyright:
     reports:
       codequality: pyright_report.json
     expire_in: 2 days
+
+build-package:
+  stage: build
+  when: manual
+  script:
+    - uv build
+  rules:
+    - *main_branch
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 2 days
+
+publish-package-test:
+  stage: publish
+  needs: [build-package]
+  script:
+    - uv publish --index testpypi
+  id_tokens:
+    TESTPYPI_ID_TOKEN:
+      aud: testpypi
+  rules:
+    - *main_branch
+  dependencies:
+    - build-package
