@@ -1,6 +1,6 @@
 variables:
   UV_VERSION: "0.9.8"
-  PYTHON_VERSION: "3.12"
+  PYTHON_VERSION: "3.10"
   BASE_LAYER: bookworm-slim
   UV_LINK_MODE: copy
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.uvcache"
@@ -69,8 +69,7 @@ pyright:
     - apt-get update
     - apt-get install -y libatomic1
   script:
-    - source .venv/bin/activate
-    - uvx pyright --outputjson | tee report_raw.json
+    - uv run --with pyright pyright --outputjson | tee report_raw.json
   after_script:
     - uvx pyright-to-gitlab-ci --src report_raw.json --output pyright_report.json --base_path .
     - *after_script
