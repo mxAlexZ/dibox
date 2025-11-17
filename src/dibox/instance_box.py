@@ -2,28 +2,27 @@ import inspect
 from contextlib import AbstractAsyncContextManager
 from typing import Any, Callable, TypeVar
 
-from .dimap import DIMap
-from .factory_box import Factory
+from .dimap import ArgNameRequest, TypeRequest, _DIMap
+from .factory_box import FactoryFunc
 
 _T = TypeVar('_T')
 
-
-class InstanceBox(AbstractAsyncContextManager):
+class _InstanceBox(AbstractAsyncContextManager):
     start_methods = ["__aenter__", "start", "__enter__"]
     close_methods = ["__aexit__", "aclose", "close", "__exit__"]
 
     def __init__(self):
-        self._items = DIMap()
+        self._items = _DIMap[Any]()
 
-    def get_instance(self, cls: type[_T] | None, name: str | None = None) -> _T | None:
+    def get_instance(self, cls: TypeRequest[_T], name: ArgNameRequest = None) -> _T | None:
         match = self._items.find_match((cls, name))
         return match[0] if match is not None else None
 
-    def register_instance(self, cls: type[_T] | None, name: str | None, value: _T) -> _T:
+    def register_instance(self, cls: TypeRequest[_T], name: ArgNameRequest, value: _T) -> _T:
         self._items[(cls, name)] = value
         return value
 
-    async def create_instance(self, cls: type[_T] | None, name: str | None, factory: Factory, **args) -> _T:
+    async def create_instance(self, cls: TypeRequest[_T], name: ArgNameRequest, factory: FactoryFunc, **args) -> _T:
         existing_item = self._items.get((cls, name))
         if existing_item is not None:
             return existing_item
@@ -40,11 +39,11 @@ class InstanceBox(AbstractAsyncContextManager):
         self._items.clear()
 
     @staticmethod
-    async def _start_instance(factory: Factory, args: dict) -> Any:
+    async def _start_instance(factory: FactoryFunc, args: dict) -> Any:
         instance = factory(**args)
         if inspect.isawaitable(instance):
             instance = await instance
-        startup_method, _ = _lookup_method(instance, InstanceBox.start_methods)
+        startup_method, _ = _InstanceBox._lookup_method(instance, _InstanceBox.start_methods)
         if startup_method is not None:
             startup_res = startup_method()
             if inspect.isawaitable(startup_res):
@@ -53,7 +52,7 @@ class InstanceBox(AbstractAsyncContextManager):
 
     @staticmethod
     async def _shutdown_instance(instance):
-        close_method, close_method_name = _lookup_method(instance, InstanceBox.close_methods)
+        close_method, close_method_name = _InstanceBox._lookup_method(instance, _InstanceBox.close_methods)
         if close_method is not None:
             if close_method_name.startswith("__"):  # __exit__/__aexit__
                 res = close_method(None, None, None)
@@ -62,9 +61,10 @@ class InstanceBox(AbstractAsyncContextManager):
             if inspect.isawaitable(res):
                 await res
 
-def _lookup_method(obj, method_names) -> tuple[Callable | None, str]:
-    for method_name in method_names:
-        method = getattr(obj, method_name, None)
-        if method is not None:
-            return method, method_name
-    return None, ""
+    @staticmethod
+    def _lookup_method(obj, method_names) -> tuple[Callable | None, str]:
+        for method_name in method_names:
+            method = getattr(obj, method_name, None)
+            if method is not None:
+                return method, method_name
+        return None, ""
