@@ -7,7 +7,16 @@ _injected_mark = object()
 _not_injected_mark = object()
 
 Injected = Annotated[T, _injected_mark]
+"""
+Marker for parameters used by inject() decorator with inject_mode=InjectMode.Marked
+that should be injected by the DI container.
+"""
+
 NotInjected = Annotated[T, _not_injected_mark]
+"""
+Marker for parameters used by inject() decorator with inject_mode=InjectMode.All
+that should not be injected by the DI container.
+"""
 
 
 def get_injected_type(p: inspect.Parameter, inject_all: bool) -> type | None:

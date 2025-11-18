@@ -13,6 +13,12 @@ MatchResult = tuple[FactoryFunc[_T], DIMapKey[_T]]
 TypeRequest = type[_T] | UnionType
 
 class _FactoryBox:
+    """
+    A container for managing factory functions.
+    It supports two types of bindings:
+    - Direct type-to-factory mappings with optional argument names
+    - Function-based selectors that dynamically match types
+    """
     def __init__(self):
         self.map = _DIMap[FactoryFunc]()
         self.func_bindings = []

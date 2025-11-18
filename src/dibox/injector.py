@@ -9,10 +9,40 @@ from .dibox import DIBox
 global_dibox = DIBox()
 
 class InjectMode(Enum):
+    """
+    Specifies the mode of dependency injection for the inject decorator:
+    whether all parameters with type hints should be considered for injection,
+    or only those explicitly marked.
+    """
     All = "all"
     Marked = "marked"
 
 def inject(container: DIBox = global_dibox, inject_mode: InjectMode = InjectMode.Marked):
+    """
+    Decorator for injecting dependencies into a function from a DI container.
+
+    This decorator should only be used at application entry points; for example,
+    at REST endpoint definitions like AWS lambda handlers or FastAPI routes.
+
+    By default (in `InjectMode.Marked`), it injects dependencies only for
+    parameters annotated with `Injected`. The decorated function's signature is
+    modified to remove the injected parameters, so they don't need to be passed
+    when calling it. However, they can still be passed as keyword arguments to
+    override the injection.
+
+    Usage example:
+    ```python
+    @inject()
+    def consumer(foo: Injected[Foo]):
+        ...
+
+    # foo will be resolved automatically
+    consumer()
+
+    # But you can still override it
+    consumer(foo=...)
+    ```
+    """
     def decorator(func):
         injected_params = get_injected_params(func, inject_mode == InjectMode.All)
         if inspect.iscoroutinefunction(func):
@@ -25,6 +55,7 @@ def inject(container: DIBox = global_dibox, inject_mode: InjectMode = InjectMode
     return decorator
 
 def inject_all(container: DIBox = global_dibox):
+    """A shorthand for `inject(container, InjectMode.All)`."""
     return inject(container, InjectMode.All)
 
 def _make_async_wrapper(func: Callable, container: DIBox, injected_params: dict[str, Type]):

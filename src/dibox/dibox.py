@@ -11,12 +11,50 @@ _T = TypeVar('_T')
 logger = logging.getLogger(__name__)
 
 class DIBox(AbstractAsyncContextManager):
+    """A dependency injection container.
+
+    `DIBox` is responsible for creating and managing the lifecycle of objects
+    (called "services" or "dependencies"). It can automatically resolve and
+    inject dependencies for requested types.
+
+    It works as an async context manager, allowing for proper cleanup of
+    resources.
+
+    Usage example:
+    ```python
+    box = DIBox()
+    # Bind a base class to a specific implementation
+    box.bind(Service, ServiceImpl)
+    # Dynamic binding: create any requested *Config class using a custom loader
+    box.bind(lambda t: t.__name__.endswith("Config"), lambda config_type: load_config(config_type))
+
+    async with box:
+        # Concrete classes don't need special binding and can be resolved automatically,
+        # including any of its dependencies.
+        concrete_service = await box.provide(MyService)
+        # Get an instance of Service, DIBox will create ServiceImpl and any of its dependencies.
+        service = await box.provide(Service)
+        # Provide DbConfig, which matches the predicate and will be created by the factory function.
+        db_config = await box.provide(DbConfig)
+    """
     def __init__(self):
         self.instances = _InstanceBox()
         self.factories = _FactoryBox()
         self._startup_func: None | Callable[[], Awaitable[None]] = None
 
     def bind(self, type_selector: TypeSelector[_T], to: _T | FactoryFunc[_T], name: ArgNameRequest = None, **kwargs):
+        """
+        Binds a type or a predicate to a specific implementation or instance.
+
+        Args:
+            type_selector: The type to bind or a predicate
+                (a function that takes a type and returns a boolean).
+            to: The implementation to use. Can be a class, a factory function,
+                or a specific instance.
+            name: An optional argument name for the binding.
+            **kwargs: Additional keyword arguments to pass to the factory
+                function when creating an instance.
+        """
         if callable(to):
             self.factories.bind(type_selector, cast(FactoryFunc[_T], to), argname=name, **kwargs)  # bind to a factory
         elif callable(type_selector) and not inspect.isclass(type_selector):
@@ -27,6 +65,20 @@ class DIBox(AbstractAsyncContextManager):
             self.instances.register_instance(type_selector, name, to)
 
     async def provide(self, requested_type: TypeRequest[_T], name: ArgNameRequest = None) -> _T:
+        """Provides an instance of the requested type.
+
+        If an instance is already created, it will be returned. Otherwise, a new
+        instance will be created, with all its dependencies resolved and
+        injected automatically. In most cases, you would not need to call this
+        method directly, as it is used internally by the `inject` decorator.
+
+        Args:
+            requested_type: The type of the instance to provide.
+            name: The optional argument name.
+
+        Returns:
+            An instance of the requested type.
+        """
         try:
             instance = self.resolve(requested_type, name)
         except KeyError:
@@ -34,12 +86,30 @@ class DIBox(AbstractAsyncContextManager):
         return instance
 
     def resolve(self, requested_type: TypeRequest[_T], name: ArgNameRequest = None ) -> _T:
+        """Resolves an already created instance of the requested type.
+
+        This is a synchronous method that does not create new instances.
+
+        Args:
+            requested_type: The type of the instance to resolve.
+            name: The optional argument name.
+
+        Returns:
+            The existing instance of the requested type.
+
+        Raises:
+            KeyError: If no instance of the requested type is found.
+        """
         instance = self.instances.get_instance(requested_type, name)
         if instance is None:
             raise KeyError(f"Instance of {requested_type} is not found")
         return instance
 
     async def close(self):
+        """Closes the container and cleans up all created instances.
+
+        This method is called automatically when exiting an `async with` block.
+        """
         await self.instances.close()
 
     async def _create_instance(self, requested_type: TypeRequest[_T], name: ArgNameRequest) -> _T:

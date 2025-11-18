@@ -9,6 +9,9 @@ DIMapKey = tuple[TypeRequest[_T], ArgNameRequest]
 MatchResult = tuple[_V, DIMapKey[_T]] | None
 
 class _DIMap(dict[DIMapKey, _V]):
+    """
+    A dictionary-like container, allowing retrieval by argument type and name.
+    """
     def find_match(self, key: DIMapKey[_T]) -> MatchResult[_V, _T]:
         for subtype in _expand_type(key[0]):  # iterate through all subtypes if requested type is an union type
             match = self._find_match(subtype, key[1])
