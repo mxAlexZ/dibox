@@ -2,7 +2,27 @@
 
 Async-native dependency injection framework based on type hints and automatic lifecycle management.
 
-[[_TOC_]]
+- [Installation](#installation)
+- [What is DIBox?](#what-is-dibox)
+- [Key Features](#key-features)
+- [Quickstart](#quickstart)
+  - [1. Define your application as usual](#1-define-your-application-as-usual)
+  - [2. Wire and Run](#2-wire-and-run)
+- [Advanced usage](#advanced-usage)
+  - [Using the @inject Decorator](#using-the-inject-decorator)
+  - [Advanced Binding Patterns](#advanced-binding-patterns)
+    - [Binding Interfaces & Instances](#binding-interfaces--instances)
+    - [Factory Functions](#factory-functions)
+    - [Named dependencies](#named-dependencies)
+    - [Dynamic Predicate-Based Binding](#dynamic-predicate-based-binding)
+- [Why use DIBox?](#why-use-dibox)
+  - [The Power of Auto-Wiring](#the-power-of-auto-wiring)
+  - [Comparison with Other Frameworks](#comparison-with-other-frameworks)
+    - [vs. Manual Dependency Injection](#vs-manual-dependency-injection)
+    - [vs. dependency-injector](#vs-dependency-injector)
+    - [vs. Injector](#vs-injector)
+    - [vs. Punq](#vs-punq)
+    - [vs. FastAPI's Depends](#vs-fastapis-depends)
 
 ## Installation
 ```
@@ -23,7 +43,7 @@ Declare dependencies naturally—in constructors or entry points—and DIBox res
 - **Advanced Binding Options:** Supports predicate bindings, named injections, and factory functions (with auto‑injected factory parameters).
 - **Optional Decorators:** `@inject` is convenience only; explicit `await box.provide(...)` stays fully supported for framework integration.
 - **No Forced Global State:** A global container exists for convenience, but DIBox works equally well with per‑scope/local instances—ideal for unit tests and isolated runtimes without hidden singletons.
-- **Non‑Invasive:** Works with any class using type hints—including third-party SDKs, dataclasses, and attrs—no wrappers or base classes required.
+- **Non‑Invasive:** Works with any class using type hints—including third-party SDKs, dataclasses, and attrs — no wrappers or base classes required.
 
 ## Quickstart
 DIBox requires almost no setup. Define your classes as usual—whether you use standard Python classes with `__init__`, dataclasses, or attrs models.
@@ -50,9 +70,9 @@ class Database:
 class Service:
     def __init__(self, db: Database):
         self.db = db
-    
+
     async def start(self):
-        await asyncio.sleep(0.05)  # simulate warm-up 
+        await asyncio.sleep(0.05)  # simulate warm-up
         print("Service started")
 
     def run(self):
@@ -71,7 +91,7 @@ from dibox import DIBox
 async def main():
     # 1. Create the container
     async with DIBox() as box:
-        
+
         # 2. Bind simple core objects
         box.bind(Credentials, Credentials(username="admin"))
 
@@ -96,7 +116,7 @@ You can use the @inject decorator here. It inspects your arguments, identifies w
 
 **Example: Azure Function Handler**
 
-In this scenario, the Azure runtime calls `main` with a `req` object. DIBox intercepts the call, creates your `ProcessingService` (and its dependencies), and injects it alongside the request. 
+In this scenario, the Azure runtime calls `main` with a `req` object. DIBox intercepts the call, creates your `ProcessingService` (and its dependencies), and injects it alongside the request.
 
 ```python
 import azure.functions as func
@@ -109,7 +129,7 @@ class ProcessingService:
 # The decorator modifies the signature so Azure sees: main(req: func.HttpRequest)
 # But DIBox calls it as: main(req, service=instance_of_processing_service)
 @inject()
-async def main(req: func.HttpRequest, service: Injected[ProcessingService]) -> func.HttpResponse:    
+async def main(req: func.HttpRequest, service: Injected[ProcessingService]) -> func.HttpResponse:
     result = service.process(req.get_body().decode())
     return func.HttpResponse(f"Success! {result}", status_code=200)
 ```
@@ -147,12 +167,12 @@ async def specific_handler(service: Injected[Service]):
 DIBox shines when you need precise control over object creation. You can mix and match these patterns to handle everything from cloud clients to dynamic configuration.
 
 #### Binding Interfaces & Instances
-You can bind a base class to a concrete implementation or a specific instance. 
+You can bind a base class to a concrete implementation or a specific instance.
 
 ```python
 azure_credentials = DefaultAzureCredential()
 # Any request for TokenCredential will receive azure_credentials object
-dibox.bind(TokenCredential, azure_credentials)  
+dibox.bind(TokenCredential, azure_credentials)
 # Or bind an interface to a concrete class
 dibox.bind(DatabaseInterface, CosmosDBDatabase)
 ```
@@ -193,7 +213,7 @@ class DataService:
         self.orders = orders  # Injected with "orders" binding
 
 # Requesting DataService will get both ContainerClients injected correctly
-data_service = await box.provide(DataService) 
+data_service = await box.provide(DataService)
 ```
 
 #### Dynamic Predicate-Based Binding

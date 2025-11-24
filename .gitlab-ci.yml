@@ -83,7 +83,6 @@ pyright:
 
 build-package:
   stage: build
-  when: manual
   script:
     - uv build
   rules:
@@ -96,11 +95,25 @@ build-package:
 publish-package-test:
   stage: publish
   needs: [build-package]
+  when: manual
   script:
     - uv publish --index testpypi
   id_tokens:
     TESTPYPI_ID_TOKEN:
       aud: testpypi
+  rules:
+    - *main_branch
+  dependencies:
+    - build-package
+
+publish-package-pypi:
+  stage: publish
+  needs: [build-package]
+  script:
+    - uv publish
+  id_tokens:
+    PYPI_ID_TOKEN:
+      aud: pypi
   rules:
     - *main_branch
   dependencies:
