@@ -109,6 +109,7 @@ publish-package-test:
 publish-package-pypi:
   stage: publish
   needs: [build-package]
+  when: manual
   script:
     - uv publish
   id_tokens:
