@@ -30,7 +30,7 @@ class DIBox(AbstractAsyncContextManager):
 
     async with box:
         # Concrete classes don't need special binding and can be resolved automatically,
-        # including any of its dependencies.
+        # including its dependencies.
         concrete_service = await box.provide(MyService)
         # Get an instance of Service, DIBox will create ServiceImpl and any of its dependencies.
         service = await box.provide(Service)

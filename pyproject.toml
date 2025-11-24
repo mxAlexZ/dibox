@@ -1,13 +1,32 @@
 [project]
 name = "dibox"
-version = "0.1.1.dev2"
-description = "Dependency injection framework for Python with auto wiring and context management."
+version = "0.1.2a1"
+description = "Async-native dependency injection framework based on type hints and automatic lifecycle management"
 authors = [
     {name = "Alex Zee", email = "alex.zee@outlook.cz"},
 ]
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
+license = {file = "LICENSE"}
+keywords = ["dependency injection", "async", "type hints", "lifecycle"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Framework :: AsyncIO",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
+
+[project.urls]
+homepage = "https://gitlab.com/AlexZee/dibox"
+source = "https://gitlab.com/AlexZee/dibox"
 
 [dependency-groups]
 dev = [
