@@ -1,11 +1,20 @@
+
 # DIBox
 
-Async-native dependency injection framework based on type hints and automatic lifecycle management.
+---
+
+**⚠️ Project Status: Early Development**
+
+This library is in its early stages. The design and API are not yet fully established and may change significantly in future releases. Feedback, suggestions, and contributions are very welcome!
+
+---
+
+Async-native dependency injection framework based on type hints.
 
 - [Installation](#installation)
 - [What is DIBox?](#what-is-dibox)
 - [Key Features](#key-features)
-- [Quickstart](#quickstart)
+- [QuickStart](#quickstart)
   - [1. Define your application as usual](#1-define-your-application-as-usual)
   - [2. Wire and Run](#2-wire-and-run)
 - [Advanced usage](#advanced-usage)
@@ -22,36 +31,42 @@ Async-native dependency injection framework based on type hints and automatic li
     - [vs. dependency-injector](#vs-dependency-injector)
     - [vs. Injector](#vs-injector)
     - [vs. Punq](#vs-punq)
+    - [vs. Dishka](#vs-dishka)
     - [vs. FastAPI's Depends](#vs-fastapis-depends)
+- [Contributing](#contributing)
 
 ## Installation
 ```
 pip install dibox
 ```
 
-## What is DIBox?
-DIBox is an async‑native, zero‑configuration dependency injection framework that uses standard Python type hints to build and manage your service graph automatically. Inspired by the ergonomics of FastAPI and Typer, it removes factory and wiring boilerplate so you can focus on application logic.
+Requires Python 3.10+.
 
-Declare dependencies naturally—in constructors or entry points—and DIBox resolves, instantiates, and injects them on demand. It also orchestrates asynchronous startup and safe teardown: detecting and awaiting common hooks for resources like database connections, credential loaders, or HTTP clients. This lets you fetch secrets, warm clients, and open connections automatically—then shut them down cleanly without extra glue code.
+## What is DIBox?
+DIBox is an async‑native dependency injection container that uses standard Python type hints to build and manage your service dependency graph automatically. The core philosophy is to remove factory and wiring boilerplate so you can focus on application logic.
+
+DIBox resolves, instantiates, and injects dependencies by following naturally defined type hints in constructors or entry points. It also orchestrates asynchronous startup and safe teardown for resources like database connections, credential loaders, or HTTP clients without extra glue code.
 
 ## Key Features
-- **Easy to Learn & Use:** No steep learning curve or complex terminology to master. Even for complex projects, explicit binding is minimal since most classes auto‑wire from type hints.
-- **Zero‑Config Instantiation:** If a class can be constructed, DIBox will resolve and inject it—no extra configuration required.
+- **Easy to Adopt:** Minimal concepts and minimal binding for most internal code.
+- **Pragmatic Auto-Wiring:** If a class can be constructed based on type hints, DIBox will build it. This convention-first approach eliminates nearly all factory boilerplate for your internal services.
 - **Async‑Native Core:** Seamlessly injects into async call chains and supports async factories out of the box.
 - **Lifecycle Automation:** Detects and runs `start()`/`close()`, or context manager hooks (`__aenter__`/`__aexit__`, `__enter__`/`__exit__`) to manage resources safely.
-- **Pure Typing Integration:** Uses standard typing (`Annotated`, `Union`, generics) for resolution—editor friendly and refactor safe.
 - **Advanced Binding Options:** Supports predicate bindings, named injections, and factory functions (with auto‑injected factory parameters).
-- **Optional Decorators:** `@inject` is convenience only; explicit `await box.provide(...)` stays fully supported for framework integration.
-- **No Forced Global State:** A global container exists for convenience, but DIBox works equally well with per‑scope/local instances—ideal for unit tests and isolated runtimes without hidden singletons.
 - **Non‑Invasive:** Works with any class using type hints—including third-party SDKs, dataclasses, and attrs — no wrappers or base classes required.
+- **No Forced Global State:** A global container exists for convenience, but DIBox works equally well with per‑scope/local instances—ideal for unit tests and isolated runtimes without hidden singletons.
+- **Optional Decorators:** `@inject` is convenience only; explicit `await box.provide(...)` stays fully supported for framework integration.
+- **Typed API:** The public API is strictly type-annotated, so it works well type checkers and IDE autocompletion.
 
-## Quickstart
+## QuickStart
 DIBox requires almost no setup. Define your classes as usual—whether you use standard Python classes with `__init__`, dataclasses, or attrs models.
 
 ### 1. Define your application as usual
-We define a `Database` that requires asynchronous connection logic. Notice we implement `__aenter__` and `__aexit__`—DIBox will detect these and manage the connection for us automatically. Alternatively, you can implement `start()`/`close()` methods if you prefer.
+DIBox can manage common lifecycle hooks, it detects and calls the commonly used methods like `start()`/`close()` or context manager methods like `__aenter__`/`__aexit__`.
 
 ```python
+import asyncio
+
 class Credentials:
     def __init__(self, username: str):
         self.username = username
@@ -59,13 +74,6 @@ class Credentials:
 class Database:
     def __init__(self, creds: Credentials):
         self.creds = creds
-
-    def __enter__(self):
-        print(f"Database connected as {self.creds.username}")
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        print("Database connection closed")
 
 class Service:
     def __init__(self, db: Database):
@@ -75,17 +83,24 @@ class Service:
         await asyncio.sleep(0.05)  # simulate warm-up
         print("Service started")
 
+    async def close(self):
+        await asyncio.sleep(0.05)  # simulate cleanup
+        print("Service closed")
+
     def run(self):
         print("Service is running...")
 
 ```
 
 ### 2. Wire and Run
-We only need to bind the Credentials manually because they are raw data. DIBox automatically figures out how to create the Database and inject it into the Service.
+We only bind `Credentials` manually because it is raw data. DIBox automatically figures out how to create `Database` and inject it into `Service`.
 
 Crucially, because we use async with box, the container ensures our database connects before usage and closes safely after exiting the block.
 
+Using `async with DIBox()` is optional, but it’s the easiest way to guarantee teardown runs.
+
 ```python
+import asyncio
 from dibox import DIBox
 
 async def main():
@@ -96,16 +111,16 @@ async def main():
         box.bind(Credentials, Credentials(username="admin"))
 
         # 3. Request the service
-        # DIBox creates Database -> calls __enter__ -> injects into Service -> awaits start()
+        # DIBox creates Credentials -> Database -> Service + awaits start()
         service = await box.provide(Service)
         service.run()
-    # DIBox automatically called __exit__ on the Database here!
+    # DIBox automatically called close() on the Service here!
 
 if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-You have just built a type-safe, async-native application with zero boilerplate. But we are just getting started. DIBox is packed with powerful features to handle complex architectures—including interface binding, factory functions, and optional decorators for your entry points. Ready to see what else it can do? Let's dive in!
+That’s the core loop: bind the bits DIBox can’t infer, then `provide(...)` an entry type and let the container manage construction + cleanup.
 
 ## Advanced usage
 
@@ -170,11 +185,15 @@ DIBox shines when you need precise control over object creation. You can mix and
 You can bind a base class to a concrete implementation or a specific instance.
 
 ```python
+from dibox import DIBox
+
+box = DIBox()
+
 azure_credentials = DefaultAzureCredential()
 # Any request for TokenCredential will receive azure_credentials object
-dibox.bind(TokenCredential, azure_credentials)
+box.bind(TokenCredential, azure_credentials)
 # Or bind an interface to a concrete class
-dibox.bind(DatabaseInterface, CosmosDBDatabase)
+box.bind(DatabaseInterface, CosmosDBDatabase)
 ```
 
 #### Factory Functions
@@ -256,8 +275,16 @@ There are many great DI frameworks for Python out there. Here is why you might c
 
 - **vs. [Punq](https://bobthemighty.github.io/punq/)**
     - **The Approach:** Punq is a minimalistic DI container that shares our philosophy of simplicity and auto-wiring. It relies heavily on explicit bindings and does not support advanced features like async lifecycle management or predicate-based bindings.
-    - **The DIBox Difference:** DIBox offers a richer feature set while maintaining simplicity. Its auto-wiring capabilities, async-native design, and smart lifecycle management set it apart from more basic containers like Punq.
+    - **The DIBox Difference:** DIBox adds async lifecycle management and a few more binding patterns while keeping the same “type-hints-first” feel.
+
+- **vs. [Dishka](https://dishka.readthedocs.io/en/latest/)**
+  - **The Approach:** Dishka is a powerful DI framework built around a first-class scoping system and explicit `Provider` classes. This gives you fine-grained control over dependency lifetimes and structure, with ready-made integrations for many popular frameworks.
+  - **The DIBox Difference:** DIBox offers a simpler, more minimal API. Instead of `Provider` classes, DIBox auto-wires any class with a type-annotated constructor, so you only bind what can't be inferred (e.g., interfaces, raw values). This convention-over-configuration approach reduces boilerplate for common cases. DIBox also offers unique features like predicate-based binding and named-argument injection. However, Dishka currently has a more mature feature set, including a robust scoping model, modular provider composition, and a dependency graph visualizer. If those features are critical for your project right now, Dishka is an excellent choice. Scopes and modules are on the DIBox roadmap.
 
 - **vs. [FastAPI's Depends](https://fastapi.tiangolo.com/tutorial/dependencies/)**
   - **The Approach:** FastAPI revolutionized Python development with its intuitive, type-hint-based dependency injection. It is the primary inspiration behind DIBox. FastAPI's dependency injection system is tightly integrated with its web framework. It uses the `Depends` marker to declare dependencies in path operation functions.
   - **The DIBox Difference:** While FastAPI's DI is excellent for web applications, DIBox is a standalone framework that can be used across any Python application. It extends the same principles to a broader context, including CLI apps, serverless functions, and background services. DIBox also adds advanced features like async lifecycle management and predicate-based bindings that go beyond FastAPI's capabilities.
+
+## Contributing
+The project is in early stages, and contributions are welcome! Please contact me (Alex Z.) via [GitHub issues](https://github.com/mxAlexZ/dibox/issues), [LinkedIn](https://www.linkedin.com/in/alex-zee/) or [email](mailto:alex.zee@outlook.cz) for any questions, suggestions, or contributions.
+The source code is hosted both on GitHub (https://github.com/mxAlexZ/dibox) and GitLab (https://gitlab.com/AlexZee/dibox). The actual development happens on GitLab, while GitHub is used for better visibility.

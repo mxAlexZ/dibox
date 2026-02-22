@@ -1,7 +1,7 @@
 [project]
 name = "dibox"
 version = "0.1.2a1"
-description = "Async-native dependency injection framework based on type hints and automatic lifecycle management"
+description = "Async-native dependency injection framework based on type hints"
 authors = [
     {name = "Alex Zee", email = "alex.zee@outlook.cz"},
 ]
