@@ -95,32 +95,46 @@ class Service:
 ### 2. Wire and Run
 We only bind `Credentials` manually because it is raw data. DIBox automatically figures out how to create `Database` and inject it into `Service`.
 
-Crucially, because we use async with box, the container ensures our database connects before usage and closes safely after exiting the block.
-
-Using `async with DIBox()` is optional, but it’s the easiest way to guarantee teardown runs.
+The only wiring you need to do is tell DIBox how to create the things it can’t infer on its own (like `Credentials`)
 
 ```python
-import asyncio
-from dibox import DIBox
+def setup_bindings(box: DIBox):
+    box.bind(Credentials, Credentials(username="admin"))
+```
 
-async def main():
-    # 1. Create the container
-    async with DIBox() as box:
+To get a service instance, just call `provide()` with the target type. DIBox will inspect the constructor, see that it needs a `Database`, then see that `Database` needs `Credentials`, and automatically build the whole graph for you. Moreover, the container ensures all context manager classes are properly entered and exited.
 
-        # 2. Bind simple core objects
-        box.bind(Credentials, Credentials(username="admin"))
+```python
+box = DIBox()
 
-        # 3. Request the service
+async def run():
         # DIBox creates Credentials -> Database -> Service + awaits start()
         service = await box.provide(Service)
         service.run()
-    # DIBox automatically called close() on the Service here!
+```
+There is also another way if you prefer decorators instead of explicit `provide()` calls:
 
-if __name__ == "__main__":
-    asyncio.run(main())
+```python
+box = DIBox()
+
+@inject(box)
+async def run(service: Injected[Service]):
+    service.run()
 ```
 
-That’s the core loop: bind the bits DIBox can’t infer, then `provide(...)` an entry type and let the container manage construction + cleanup.
+Finally, you just need to run the main loop with the container managing the lifecycle:
+
+```python
+async def async_main():
+    async with box:
+        setup_bindings(box)
+        await run()
+
+if __name__ == "__main__":
+    asyncio.run(async_main())
+```
+
+That’s the core loop: bind the bits DIBox can’t infer, then `@inject` or `provide(...)` at the entry point and let the container manage construction + cleanup.
 
 ## Advanced usage
 
