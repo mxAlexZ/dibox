@@ -129,6 +129,8 @@ async def async_main():
     async with box:
         setup_bindings(box)
         await run()
+    # dibox automatically calls close() on Service and any other resources
+    # when exiting the context
 
 if __name__ == "__main__":
     asyncio.run(async_main())
@@ -205,7 +207,8 @@ box = DIBox()
 
 azure_credentials = DefaultAzureCredential()
 # Any request for TokenCredential will receive azure_credentials object
-box.bind(TokenCredential, azure_credentials)
+# box.bind(TokenCredential, azure_credentials) works too!
+box.bind(TokenCredential, instance=azure_credentials)
 # Or bind an interface to a concrete class
 box.bind(DatabaseInterface, CosmosDBDatabase)
 ```
@@ -227,7 +230,8 @@ def create_orders_container(client: CosmosClient) -> OrderContainer:
 
 # Bind factories (DIBox auto-injects Settings, awaits async factory)
 box.bind(CosmosClient, create_cosmos_client)
-box.bind(OrderContainer, create_orders_container)
+# to be more explicit, you can use the factory= keyword argument:
+box.bind(OrderContainer, factory=create_orders_container)
 
 order_container = await box.provide(OrderContainer)  # auto sequence:
 # Settings -> await create_cosmos_client -> create_orders_container
@@ -237,8 +241,8 @@ order_container = await box.provide(OrderContainer)  # auto sequence:
 If you need multiple instances of the same type (like two different storage containers), use the name parameter. DIBox matches this binding to the argument name.
 
 ```python
-box.bind(ContainerClient, create_users_container, name="users")
-box.bind(ContainerClient, create_orders_container, name="orders")
+box.bind(ContainerClient, "users", factory=create_users_container)
+box.bind(ContainerClient, "orders", factory=create_orders_container)
 
 class DataService:
     def __init__(self, users: ContainerClient, orders: ContainerClient):
@@ -250,7 +254,7 @@ data_service = await box.provide(DataService)
 ```
 
 #### Dynamic Predicate-Based Binding
-For repeatable patterns, you can use a predicate function to match types dynamically. This is useful for generic loaders or handlers.
+For repeatable patterns, you can use a predicate function to match types dynamically. This is useful for generic loaders or handlers. The factory function can also receive the requested type as a parameter for more context-aware creation.
 
 ```python
 def load_settings(t: type) -> object:

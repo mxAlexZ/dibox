@@ -4,4 +4,10 @@
     ],
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true,
+    "files.exclude": {
+        ".pytest_cache": true,
+        ".ruff_cache": true,
+        ".venv": true,
+        "**/__pycache__": true
+    },
 }

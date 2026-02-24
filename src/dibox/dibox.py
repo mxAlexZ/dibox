@@ -1,16 +1,15 @@
 import inspect
 import logging
-from contextlib import AbstractAsyncContextManager
-from typing import Any, Awaitable, Callable, TypeVar, cast, get_origin
+from typing import Any, TypeVar, get_origin
 
-from .dimap import ArgNameRequest, TypeRequest
-from .factory_box import FactoryFunc, TypeSelector, _FactoryBox
-from .instance_box import _InstanceBox
+from .dimap import ArgNameQuery, TypeQuery
+from .factory_box import BindingRecord, FactoryBox
+from .instance_box import InstanceBox
 
 _T = TypeVar('_T')
 logger = logging.getLogger(__name__)
 
-class DIBox(AbstractAsyncContextManager):
+class DIBox(FactoryBox):
     """A dependency injection container.
 
     `DIBox` is responsible for creating and managing the lifecycle of objects
@@ -38,33 +37,10 @@ class DIBox(AbstractAsyncContextManager):
         db_config = await box.provide(DbConfig)
     """
     def __init__(self):
-        self.instances = _InstanceBox()
-        self.factories = _FactoryBox()
-        self._startup_func: None | Callable[[], Awaitable[None]] = None
+        self.instances = InstanceBox()
+        super().__init__()
 
-    def bind(self, type_selector: TypeSelector[_T], to: _T | FactoryFunc[_T], name: ArgNameRequest = None, **kwargs):
-        """
-        Binds a type or a predicate to a specific implementation or instance.
-
-        Args:
-            type_selector: The type to bind or a predicate
-                (a function that takes a type and returns a boolean).
-            to: The implementation to use. Can be a class, a factory function,
-                or a specific instance.
-            name: An optional argument name for the binding.
-            **kwargs: Additional keyword arguments to pass to the factory
-                function when creating an instance.
-        """
-        if callable(to):
-            self.factories.bind(type_selector, cast(FactoryFunc[_T], to), argname=name, **kwargs)  # bind to a factory
-        elif callable(type_selector) and not inspect.isclass(type_selector):
-            self.factories.bind(type_selector, lambda: to, argname=name)    # a predicate selector bound to an instance
-        elif kwargs:
-            raise ValueError("kwargs are only allowed when binding to a callable")
-        else:
-            self.instances.register_instance(type_selector, name, to)
-
-    async def provide(self, requested_type: TypeRequest[_T], name: ArgNameRequest = None) -> _T:
+    async def provide(self, requested_type: TypeQuery[_T], name: ArgNameQuery = None) -> _T:
         """Provides an instance of the requested type.
 
         If an instance is already created, it will be returned. Otherwise, a new
@@ -85,7 +61,7 @@ class DIBox(AbstractAsyncContextManager):
             instance = await self._create_instance(requested_type, name)
         return instance
 
-    def resolve(self, requested_type: TypeRequest[_T], name: ArgNameRequest = None ) -> _T:
+    def resolve(self, requested_type: TypeQuery[_T], name: ArgNameQuery = None ) -> _T:
         """Resolves an already created instance of the requested type.
 
         This is a synchronous method that does not create new instances.
@@ -112,17 +88,20 @@ class DIBox(AbstractAsyncContextManager):
         """
         await self.instances.close()
 
-    async def _create_instance(self, requested_type: TypeRequest[_T], name: ArgNameRequest) -> _T:
+    async def _create_instance(self, requested_type: TypeQuery[_T], name: ArgNameQuery) -> _T:
         logger.debug("Creating instance of %s: %s...", name, requested_type)
-        factory, map_key = self.factories.get_factory(requested_type, name)
+        binding_record, (matched_type, matched_arg) = self.find_binding(requested_type, name)
         # the first argument can be used as a type of the dependency to be created
-        args_override = self._find_factory_bound_arguments(requested_type, factory)
-        args = await self._provide_dependencies(factory, args_override)
-        instance = await self.instances.create_instance(map_key[0], map_key[1], factory, **args)
-        logger.debug("Instance of %s: %s was created", map_key[0], map_key[1])
+        args_override = self._bind_factory_type_argument(matched_type, binding_record)
+        args = await self._provide_dependencies(binding_record, args_override)
+        factory = binding_record.async_factory or binding_record.sync_factory
+        # todo: branch sync/async
+        assert factory is not None, "Binding record must have at least one factory"
+        instance = await self.instances.create_instance(matched_type, matched_arg, factory, **args)
+        logger.debug("Instance of %s: %s was created", matched_type, matched_arg)
         return instance
 
-    async def _provide_dependencies(self, consumer: Callable, args_override: dict[str, Any]) -> dict[str, Any]:
+    async def _provide_dependencies(self, consumer: BindingRecord[Any], args_override: dict[str, Any]) -> dict[str, Any]:
         args = self._list_dependencies(consumer, args_override)
         dependencies: dict[str, Any] = {}
         for arg_name, arg_type in args:
@@ -133,9 +112,9 @@ class DIBox(AbstractAsyncContextManager):
         return dependencies
 
     @staticmethod
-    def _list_dependencies(consumer: Callable, args_override: dict[str, Any]) -> list[tuple[str, type]]:
-        res = []
-        signature = inspect.signature(consumer)
+    def _list_dependencies(consumer: BindingRecord[Any], args_override: dict[str, Any]) -> list[tuple[str, type]]:
+        res: list[tuple[str, type]] = []
+        signature = consumer.signature_info
         for parameter in signature.parameters.values():
             if (parameter.default == inspect.Parameter.empty
                 and parameter.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
@@ -146,16 +125,20 @@ class DIBox(AbstractAsyncContextManager):
         return res
 
     @staticmethod
-    def _find_factory_bound_arguments(parent_type, factory_func: Callable) -> dict[str, Any]:
+    def _bind_factory_type_argument(type_to_create: type[Any] | None, binding_record: BindingRecord[Any]) -> dict[str, Any]:
         # the first argument can be used as a type of the dependency to be created
-        res = {}
-        signature = inspect.signature(factory_func)
+        res: dict[str, Any] = {}
+        signature = binding_record.signature_info
         first_arg = next(iter(signature.parameters.values()), None)
         if first_arg is not None:
             arg_type = first_arg.annotation
-            if arg_type == inspect.Parameter.empty or get_origin(arg_type) is type:
-                res[first_arg.name] = parent_type
+            # no type annotation or type or type[...] => treat it as a type argument
+            if arg_type == inspect.Parameter.empty or arg_type is type or get_origin(arg_type) is type:
+                res[first_arg.name] = type_to_create
         return res
 
-    async def __aexit__(self, *args):
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args: Any):
         await self.close()
