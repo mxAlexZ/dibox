@@ -172,13 +172,13 @@ class TestDIBox:
             "close", "aexit", "exit"  # should be called in reverse to the order of creation
         ]
 
-    async def test_resolve_returns_provided_type(self):
+    async def test_get_returns_previously_provided_object(self):
         box = DIBox()
         foo_provided = await box.provide(Foo)
-        foo_resolved = box.resolve(Foo)
+        foo_resolved = box.get(Foo)
         assert foo_resolved is foo_provided
 
-    def test_resolve_raises_if_type_not_provided(self):
+    def test_get_raises_if_object_was_not_provided(self):
         box = DIBox()
         with pytest.raises(KeyError):
-            box.resolve(Foo)
+            box.get(Foo)

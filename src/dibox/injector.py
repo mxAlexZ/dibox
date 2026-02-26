@@ -73,6 +73,6 @@ def _make_sync_wrapper(func: Callable, container: DIBox, injected_params: dict[s
         dependencies = {}
         for param_name, param_type in injected_params.items():
             if param_name not in kwds:
-                dependencies[param_name] = container.resolve(param_type, param_name)
+                dependencies[param_name] = container.get(param_type, param_name)
         return func(*args, **{**dependencies, **kwds})
     return wrapper

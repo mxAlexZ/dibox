@@ -6,8 +6,9 @@ from .dimap import ArgNameQuery, TypeQuery
 from .factory_box import BindingRecord, FactoryBox
 from .instance_box import InstanceBox
 
-_T = TypeVar('_T')
+_T = TypeVar("_T")
 logger = logging.getLogger(__name__)
+
 
 class DIBox(FactoryBox):
     """A dependency injection container.
@@ -36,45 +37,55 @@ class DIBox(FactoryBox):
         # Provide DbConfig, which matches the predicate and will be created by the factory function.
         db_config = await box.provide(DbConfig)
     """
+
     def __init__(self):
         self.instances = InstanceBox()
         super().__init__()
 
     async def provide(self, requested_type: TypeQuery[_T], name: ArgNameQuery = None) -> _T:
-        """Provides an instance of the requested type.
+        """Provides an instance of the requested type, with optional name-based binding.
 
-        If an instance is already created, it will be returned. Otherwise, a new
-        instance will be created, with all its dependencies resolved and
-        injected automatically. In most cases, you would not need to call this
-        method directly, as it is used internally by the `inject` decorator.
+        This is the primary method for dependency resolution. DIBox matches dependencies
+        using both type and argument name, enabling named bindings where multiple instances
+        of the same type can be distinguished by parameter names.
+
+        If a matching instance already exists, it will be returned. Otherwise, DIBox will
+        create a new instance, automatically resolving and injecting all its dependencies
+        based on constructor type hints. Supports async factories and lifecycle management.
 
         Args:
             requested_type: The type of the instance to provide.
-            name: The optional argument name.
+            name: The argument name for named binding resolution. When provided,
+                DIBox first attempts to match both type and name, falling back to
+                type-only matching if no named binding exists.
 
         Returns:
-            An instance of the requested type.
+            The existing or freshly created instance matching the type and name criteria.
         """
         try:
-            instance = self.resolve(requested_type, name)
+            instance = self.get(requested_type, name)
         except KeyError:
             instance = await self._create_instance(requested_type, name)
         return instance
 
-    def resolve(self, requested_type: TypeQuery[_T], name: ArgNameQuery = None ) -> _T:
-        """Resolves an already created instance of the requested type.
+    def get(self, requested_type: TypeQuery[_T], name: ArgNameQuery = None) -> _T:
+        """Retrieves an existing instance using type and optional name matching.
 
-        This is a synchronous method that does not create new instances.
+        This synchronous method looks up already-created instances in the container.
+        Like `provide()`, it supports name-based resolution for distinguishing between
+        multiple instances of the same type. Does not trigger instance creation.
 
         Args:
-            requested_type: The type of the instance to resolve.
-            name: The optional argument name.
+            requested_type: The type of the instance to retrieve.
+            name: The argument name for named binding lookup. Enables retrieval
+                of specific named instances when multiple bindings exist for the same type.
 
         Returns:
-            The existing instance of the requested type.
+            The existing instance matching the type and name criteria.
 
         Raises:
-            KeyError: If no instance of the requested type is found.
+            KeyError: If no matching instance is found. Use `provide()` to create
+                new instances with automatic dependency resolution.
         """
         instance = self.instances.get_instance(requested_type, name)
         if instance is None:
@@ -116,7 +127,8 @@ class DIBox(FactoryBox):
         res: list[tuple[str, type]] = []
         signature = consumer.signature_info
         for parameter in signature.parameters.values():
-            if (parameter.default == inspect.Parameter.empty
+            if (
+                parameter.default == inspect.Parameter.empty
                 and parameter.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
                 and parameter.name not in args_override
                 and parameter.annotation != inspect.Parameter.empty
