@@ -1,7 +1,7 @@
 import inspect
-from typing import Annotated, Callable, TypeVar, get_args, get_origin
+from typing import Annotated, Any, Callable, TypeVar, get_args, get_origin
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 _injected_mark = object()
 _not_injected_mark = object()
@@ -28,8 +28,8 @@ def get_injected_type(p: inspect.Parameter, inject_all: bool) -> type | None:
     return p.annotation if inject_all else None
 
 
-def get_injected_params(func: Callable, inject_all: bool = False) -> dict[str, type]:
-    res = {}
+def get_injected_params(func: Callable[..., Any], inject_all: bool = False) -> dict[str, type]:
+    res: dict[str, type] = {}
     for p in inspect.signature(func).parameters.values():
         injected_type = get_injected_type(p, inject_all)
         if injected_type is not None:
@@ -37,7 +37,7 @@ def get_injected_params(func: Callable, inject_all: bool = False) -> dict[str, t
     return res
 
 
-def remove_params_from_signature(func: Callable, params: dict[str, type]):
+def remove_params_from_signature(func: Callable[..., Any], params: dict[str, type]):
     s = inspect.signature(func)
     s = s.replace(parameters=[p for p in s.parameters.values() if p.name not in params])
-    func.__signature__ = s  # type: ignore
+    func.__signature__ = s  # type: ignore - we are intentionally modifying the signature

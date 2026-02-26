@@ -1,7 +1,7 @@
 import inspect
 from enum import Enum
 from functools import update_wrapper
-from typing import Callable, Type
+from typing import Any, Callable
 
 from .annotations import get_injected_params, remove_params_from_signature
 from .dibox import DIBox
@@ -43,7 +43,7 @@ def inject(container: DIBox = global_dibox, inject_mode: InjectMode = InjectMode
     consumer(foo=...)
     ```
     """
-    def decorator(func):
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         injected_params = get_injected_params(func, inject_mode == InjectMode.All)
         if inspect.iscoroutinefunction(func):
             wrapper = _make_async_wrapper(func, container, injected_params)
@@ -58,8 +58,8 @@ def inject_all(container: DIBox = global_dibox):
     """A shorthand for `inject(container, InjectMode.All)`."""
     return inject(container, InjectMode.All)
 
-def _make_async_wrapper(func: Callable, container: DIBox, injected_params: dict[str, Type]):
-    async def wrapper(*args, **kwds):
+def _make_async_wrapper(func: Callable[..., Any], container: DIBox, injected_params: dict[str, type]):
+    async def wrapper(*args: Any, **kwds: Any):
         dependencies = {}
         for param_name, param_type in injected_params.items():
             if param_name not in kwds:
@@ -68,8 +68,8 @@ def _make_async_wrapper(func: Callable, container: DIBox, injected_params: dict[
     return wrapper
 
 
-def _make_sync_wrapper(func: Callable, container: DIBox, injected_params: dict[str, Type]):
-    def wrapper(*args, **kwds):
+def _make_sync_wrapper(func: Callable[..., Any], container: DIBox, injected_params: dict[str, type]):
+    def wrapper(*args: Any, **kwds: Any):
         dependencies = {}
         for param_name, param_type in injected_params.items():
             if param_name not in kwds:
