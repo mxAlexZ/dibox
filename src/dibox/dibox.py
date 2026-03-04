@@ -42,9 +42,8 @@ class DIBox(FactoryBox):
 
     def __init__(self, inject_mode: ArgumentStrategy = ArgumentStrategy.OPT_IN):
         self.instances = InstanceBox()
-        self.inject_mode = inject_mode
         super().__init__()
-        self.injector = Injector(self, self.inject_mode)
+        self.injector = Injector(self, inject_mode)
 
     def inject(self, func: Callable[..., _R]) -> Callable[..., _R]:
         return self.injector()(func)
