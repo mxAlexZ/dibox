@@ -70,8 +70,8 @@ pyright:
     - apt-get install -y libatomic1
   script:
     # a trick to get pyright to setup node.js at the first run to avoid it messing up the output
-    - uv run --with pyright pyright || true
-    - uv run --with pyright pyright --outputjson | tee report_raw.json
+    - uv run pyright || true
+    - uv run pyright --outputjson | tee report_raw.json
   after_script:
     - uvx pyright-to-gitlab-ci --src report_raw.json --output pyright_report.json --base_path .
     - *after_script

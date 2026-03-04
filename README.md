@@ -18,7 +18,7 @@ Async-native dependency injection framework based on type hints.
   - [1. Define your application as usual](#1-define-your-application-as-usual)
   - [2. Wire and Run](#2-wire-and-run)
 - [Advanced usage](#advanced-usage)
-  - [Using the @inject Decorator](#using-the-inject-decorator)
+  - [Using Decorators for Injection](#using-decorators-for-injection)
   - [Advanced Binding Patterns](#advanced-binding-patterns)
     - [Binding Interfaces & Instances](#binding-interfaces--instances)
     - [Factory Functions](#factory-functions)
@@ -54,8 +54,8 @@ DIBox resolves, instantiates, and injects dependencies by following naturally de
 - **Lifecycle Automation:** Detects and runs `start()`/`close()`, or context manager hooks (`__aenter__`/`__aexit__`, `__enter__`/`__exit__`) to manage resources safely.
 - **Advanced Binding Options:** Supports predicate bindings, named injections, and factory functions (with auto‑injected factory parameters).
 - **Non‑Invasive:** Works with any class using type hints—including third-party SDKs, dataclasses, and attrs — no wrappers or base classes required.
-- **No Forced Global State:** A global container exists for convenience, but DIBox works equally well with per‑scope/local instances—ideal for unit tests and isolated runtimes without hidden singletons.
-- **Optional Decorators:** `@inject` is convenience only; explicit `await box.provide(...)` stays fully supported for framework integration.
+- **No Global State Required:** Works equally well with local container instances—no hidden singletons, easy to isolate in unit tests.
+- **Two resolution styles:** Declarative decorators (like `@box.inject`) provide signature-aware, import-time integration for frameworks; imperative `box.provide(...)` gives direct runtime control.
 - **Typed API:** The public API is strictly type-annotated, so it works well type checkers and IDE autocompletion.
 
 ## QuickStart
@@ -102,22 +102,27 @@ def setup_bindings(box: DIBox):
     box.bind(Credentials, Credentials(username="admin"))
 ```
 
-To get a service instance, just call `provide()` with the target type. DIBox will inspect the constructor, see that it needs a `Database`, then see that `Database` needs `Credentials`, and automatically build the whole graph for you. Moreover, the container ensures all context manager classes are properly entered and exited.
+To get a service instance, you can call `provide()` with the target type. DIBox will inspect the constructor, see that it needs a `Database`, then see that `Database` needs `Credentials`, and automatically build the whole graph for you.
 
 ```python
 box = DIBox()
 
 async def run():
-        # DIBox creates Credentials -> Database -> Service + awaits start()
-        service = await box.provide(Service)
-        service.run()
+    # DIBox creates Credentials -> Database -> Service + awaits start()
+    service = await box.provide(Service)
+    service.run()
 ```
-There is also another way if you prefer decorators instead of explicit `provide()` calls:
+
+Alternatively, `@box.inject` can be used as a decorator. Parameters annotated with `Injected[...]` are resolved automatically.
+
+The decorator also removes these parameters from the function's visible signature, which is important when frameworks such as FastAPI or Typer inspect signatures at import time.
 
 ```python
+from dibox import DIBox, Injected
+
 box = DIBox()
 
-@inject(box)
+@box.inject
 async def run(service: Injected[Service]):
     service.run()
 ```
@@ -125,74 +130,78 @@ async def run(service: Injected[Service]):
 Finally, you just need to run the main loop with the container managing the lifecycle:
 
 ```python
-async def async_main():
-    async with box:
-        setup_bindings(box)
-        await run()
-    # dibox automatically calls close() on Service and any other resources
-    # when exiting the context
-
-if __name__ == "__main__":
-    asyncio.run(async_main())
+async with box:
+    setup_bindings(box)
+    await run()
+# When the `async with` block exits, DIBox automatically calls `close()`
+# on the `Service` instance and any other managed resources, ensuring
+# safe and predictable cleanup.
 ```
 
-That’s the core loop: bind the bits DIBox can’t infer, then `@inject` or `provide(...)` at the entry point and let the container manage construction + cleanup.
+That's the core loop: bind the bits DIBox can't infer, then use `@box.inject` or `await box.provide(...)` at the entry point and let the container handle construction and cleanup.
 
 ## Advanced usage
 
-### Using the @inject Decorator
-While strict type-hinting in constructors covers most of your application, you eventually reach the "entry points"—places where a framework (like Azure Functions, AWS Lambda, or a CLI) calls your code.
+### Using Decorators for Injection
+While `await box.provide(Service)` is great for getting a single dependency, decorators become powerful when integrating with frameworks like FastAPI, Azure Functions, or Typer. They allow you to inject dependencies into your entry points (like API routes or CLI commands) without cluttering your function signatures with DI-specific code.
 
-You can use the @inject decorator here. It inspects your arguments, identifies which ones need injection using the Injected marker, and passes them in automatically.
+A key feature of the injection decorator is **signature modification**. It removes injected parameters from the function's signature, so external frameworks don't see them. This is essential for tools like FastAPI or Typer, which inspect signatures to generate OpenAPI documentation or CLI help text.
 
-**Example: Azure Function Handler**
+DIBox offers two main ways to use decorators: directly from a container instance (`@box.inject`) or through a reusable `Injector` object.
 
-In this scenario, the Azure runtime calls `main` with a `req` object. DIBox intercepts the call, creates your `ProcessingService` (and its dependencies), and injects it alongside the request.
+#### 1. Basic Usage: `@box.inject`
+For most applications, you can use the `@box.inject` decorator directly on your functions. It automatically resolves dependencies from the container instance it belongs to.
+
+This is the most straightforward way to inject dependencies while maintaining control and testability:
 
 ```python
+from dibox import DIBox, Injected
+
+# Create a specific container for this app or test
+local_box = DIBox()
+
+# Use the decorator from the container instance
+@local_box.inject
+async def specific_handler(service: Injected[Service]):
+    ...
+```
+
+#### 2. Advanced Configuration: `Injector`
+When you need to apply the same injection configuration across multiple functions—especially in framework integrations—creating a reusable `Injector` is the best approach. An `Injector` encapsulates the injection strategy, so you don't have to repeat it.
+
+This is particularly useful for:
+-   **Framework Integration:** Creating a dedicated injector for your API layer (e.g., FastAPI routes).
+-   **Consistent Behavior:** Ensuring all functions in a specific module use the same injection settings.
+-   **Future-Proofing:** `Injector` will support advanced features like context-aware container resolvers (e.g., creating a new container for each web request).
+
+**Example: Creating a Reusable API Injector**
+
+Here, we create an `api_injector` linked to our main container. We can then use `@api_injector.inject` on all our route handlers.
+
+```python
+from dibox import DIBox, Injected, Injector
 import azure.functions as func
-from dibox import inject, Injected
+
+# 1. Create your main container
+app_box = DIBox()
+
+# 2. Create a reusable injector for your API layer
+api_injector = Injector(app_box)
 
 class ProcessingService:
     def process(self, body: str) -> str:
         return f"Processed: {body}"
 
-# The decorator modifies the signature so Azure sees: main(req: func.HttpRequest)
+# 3. Use the injector on your entry points
+# The decorator modifies the signature so the framework sees: main(req: func.HttpRequest)
 # But DIBox calls it as: main(req, service=instance_of_processing_service)
-@inject()
+@api_injector.inject
 async def main(req: func.HttpRequest, service: Injected[ProcessingService]) -> func.HttpResponse:
     result = service.process(req.get_body().decode())
     return func.HttpResponse(f"Success! {result}", status_code=200)
 ```
 
-By default, `@inject` uses a convenient `global_dibox` singleton container. You can bind dependencies to it from anywhere in your application.
-
-```python
-from dibox import global_dibox, inject, Injected
-
-# You can access global_dibox to bind things manually
-global_dibox.bind(APIKey, APIKey("secret_key"))
-
-# Uses global_dibox implicitly
-@inject()
-def my_handler(service: Injected[Service]):
-    ...
-```
-
-For greater control, you can pass a dedicated `DIBox` instance to the decorator. This ensures dependency resolution is isolated and predictable.
-
-```python
-from dibox import DIBox, inject
-
-# Create a specific container for this app or test
-local_box = DIBox()
-local_box.bind(APIKey, APIKey("test_key"))
-
-# Pass it explicitly to the decorator
-@inject(local_box)
-async def specific_handler(service: Injected[Service]):
-    ...
-```
+This pattern keeps your code clean and separates the concerns of dependency configuration from your application logic.
 
 ### Advanced Binding Patterns
 DIBox shines when you need precise control over object creation. You can mix and match these patterns to handle everything from cloud clients to dynamic configuration.

@@ -1,12 +1,14 @@
 import inspect
 import logging
-from typing import Any, TypeVar, get_origin
+from typing import Any, Awaitable, Callable, TypeVar, get_origin, overload
 
 from .dimap import ArgNameQuery, TypeQuery
 from .factory_box import BindingRecord, FactoryBox
+from .injector import ArgumentStrategy, Injector
 from .instance_box import InstanceBox
 
 _T = TypeVar("_T")
+_R = TypeVar("_R")
 logger = logging.getLogger(__name__)
 
 
@@ -38,9 +40,23 @@ class DIBox(FactoryBox):
         db_config = await box.provide(DbConfig)
     """
 
-    def __init__(self):
+    def __init__(self, inject_mode: ArgumentStrategy = ArgumentStrategy.OPT_IN):
         self.instances = InstanceBox()
+        self.inject_mode = inject_mode
         super().__init__()
+        self.injector = Injector(self, self.inject_mode)
+
+    def inject(self, func: Callable[..., _R]) -> Callable[..., _R]:
+        return self.injector()(func)
+
+    @overload
+    def call(self, func: Callable[..., Awaitable[_R]], *args: Any, **kwargs: Any) -> Awaitable[_R]: ...
+    @overload
+    def call(self, func: Callable[..., _R], *args: Any, **kwargs: Any) -> _R: ...
+    def call(self, func: Any, *args: Any, **kwargs: Any) -> Any:
+        # Todo: see the design eps - we can apply injection without markers
+        # since we have access to all bindings.
+        raise NotImplementedError("call() method is not implemented yet.")
 
     async def provide(self, requested_type: TypeQuery[_T], name: ArgNameQuery = None) -> _T:
         """Provides an instance of the requested type, with optional name-based binding.

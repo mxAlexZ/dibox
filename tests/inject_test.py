@@ -1,67 +1,81 @@
 import inspect
+from typing import Awaitable, Callable
 
-import pytest_asyncio
-from attrs import define
+import pytest
 
-from dibox import DIBox, Injected, NotInjected, global_dibox, inject, inject_all
+from dibox import DIBox, Injected, global_dibox, inject
+from dibox.annotations import NotInjected
+from dibox.injector import ArgumentStrategy
 
 
-@define
-class _Foo:
-    s: str = ""
+class Foo:
+    def __init__(self, s: str):
+        self.s: str = s
 
-_box = DIBox()
+# we have to operate on the global box here because its value is bound on the
+# import time as a default argument to the inject decorator.
+box = global_dibox
 
-@inject(_box)
-def _consumer_func_sync(a: int,  foo: Injected[_Foo]):
-    return a, foo
+@pytest.fixture(autouse=True)
+async def create_bindings():
+    async with box:
+        box.bind(Foo, Foo(s="test"))
+        yield box
 
-@inject(_box)
-async def _async_consumer_func(a: int,  foo: Injected[_Foo]):
-    return a, foo
+WrappedFunc = Callable[..., Awaitable[tuple[int, Foo]]]
 
-@inject()
-async def _async_consumer_func_global_box(a: int,  foo: Injected[_Foo]):
-    return a, foo
 
-@inject_all()
-async def _hungry_consumer_func(a: NotInjected[int], foo: _Foo):
-    return a, foo
+decorator_styles = [
+    "@inject(box)",
+    "@inject(box, ArgumentStrategy.OPT_IN)",
+    "@inject",
+    "@inject()",
+    "@inject(box, ArgumentStrategy.OPT_OUT)"
+]
+
+def _make_decorated(box: DIBox, decorator_style: str) -> WrappedFunc:
+    @inject(box)
+    async def func_inject_box(a: int, foo: Injected[Foo]):
+        return a, foo
+    @inject(box, ArgumentStrategy.OPT_IN)
+    async def func_inject_box_optin(a: int, foo: Injected[Foo]):
+        return a, foo
+    @inject
+    async def func_inject(a: int, foo: Injected[Foo]):
+        return a, foo
+    @inject()
+    async def func_inject_parenthesis(a: int, foo: Injected[Foo]):
+        return a, foo
+    @inject(box, ArgumentStrategy.OPT_OUT)
+    async def func_inject_box_optout(a: NotInjected[int], foo: Foo):
+        return a, foo
+    func_by_name: dict[str, WrappedFunc] = {
+        "@inject(box)": func_inject_box,
+        "@inject(box, ArgumentStrategy.OPT_IN)": func_inject_box_optin,
+        "@inject": func_inject,
+        "@inject()": func_inject_parenthesis,
+        "@inject(box, ArgumentStrategy.OPT_OUT)": func_inject_box_optout,
+    }
+    return func_by_name[decorator_style]
 
 class TestInjectDecorator:
-    @pytest_asyncio.fixture(autouse=True)
-    async def clear_boxes(self):
-        async with _box, global_dibox:
-            yield
+    @pytest.mark.parametrize("decorator_style", decorator_styles)
+    async def test_inject(self, decorator_style: str):
+        wrapped_func = _make_decorated(box, decorator_style)
 
-    async def test_sync_consumer_func_resolves_registered_objects(self):
-        foo = await _box.provide(_Foo)
-        res_a, res_foo = _consumer_func_sync(10)  # type: ignore
-        assert res_a == 10
-        assert res_foo is foo
+        res_a, res_foo = await wrapped_func(10)
 
-    async def test_async_consumer_func_provides_dependencies(self):
-        _box.bind(_Foo, lambda: _Foo(s="test"))
-        res_a, res_foo = await _async_consumer_func(10)  # type: ignore
         assert res_a == 10
         assert res_foo.s == "test"
+        assert inspect.signature(wrapped_func).parameters.keys() == {"a"}
 
-    async def test_async_consumer_func_global_box(self):
-        res_a, res_foo = await _async_consumer_func_global_box(10)  # type: ignore
+    @pytest.mark.parametrize("decorator_style", decorator_styles)
+    async def test_inject_injected_argument_override(self, decorator_style: str):
+        wrapped_func = _make_decorated(box, decorator_style)
+
+        foo = Foo(s="override")
+        res_a, res_foo = await wrapped_func(10, foo=foo)
+
         assert res_a == 10
-        assert isinstance(res_foo, _Foo)
-
-    async def test_annotated_args_override(self):
-        foo = _Foo()
-        res_a, res_foo = _consumer_func_sync(a=10, foo=foo)
-        assert res_a == 10
-        assert res_foo is foo
-
-    def test_changes_signature(self):
-        params = list(inspect.signature(_consumer_func_sync).parameters.keys())
-        assert params == ["a"]
-
-    async def test_inject_all(self):
-        res_a, res_foo = await _hungry_consumer_func(10)  # type: ignore
-        assert res_a == 10
-        assert isinstance(res_foo, _Foo)
+        assert res_foo.s == "override"
+        assert inspect.signature(wrapped_func).parameters.keys() == {"a"}

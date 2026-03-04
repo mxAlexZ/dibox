@@ -10,4 +10,5 @@
         ".venv": true,
         "**/__pycache__": true
     },
+    "python.analysis.inlayHints.pytestParameters": true,
 }

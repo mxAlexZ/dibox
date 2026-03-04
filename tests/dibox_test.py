@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from attrs import define
 
-from dibox import DIBox
+from dibox import DIBox, Injected
 from dibox.factory_box import FactoryFunc
 
 
@@ -182,3 +182,12 @@ class TestDIBox:
         box = DIBox()
         with pytest.raises(KeyError):
             box.get(Foo)
+
+    async def test_inject(self):
+        box = DIBox()
+        box.bind(Bar, BarDerived(s="injected"))
+        @box.inject
+        async def func(bar: Injected[Bar]) -> str:
+            return bar.s
+        result = await func()
+        assert result == "injected"
