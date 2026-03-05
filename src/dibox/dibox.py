@@ -1,6 +1,6 @@
 import inspect
 import logging
-from typing import Any, Awaitable, Callable, TypeVar, get_origin, overload
+from typing import Any, Awaitable, Callable, Self, TypeVar, get_origin, overload
 
 from .dimap import ArgNameQuery, TypeQuery
 from .factory_box import BindingRecord, FactoryBox
@@ -40,10 +40,10 @@ class DIBox(FactoryBox):
         db_config = await box.provide(DbConfig)
     """
 
-    def __init__(self, inject_mode: ArgumentStrategy = ArgumentStrategy.OPT_IN):
+    def __init__(self, inject_mode: ArgumentStrategy = ArgumentStrategy.OPT_IN) -> None:
         self.instances = InstanceBox()
-        super().__init__()
         self.injector = Injector(self, inject_mode)
+        super().__init__()
 
     def inject(self, func: Callable[..., _R]) -> Callable[..., _R]:
         return self.injector()(func)
@@ -107,7 +107,7 @@ class DIBox(FactoryBox):
             raise KeyError(f"Instance of {requested_type} is not found")
         return instance
 
-    async def close(self):
+    async def close(self) -> None:
         """Closes the container and cleans up all created instances.
 
         This method is called automatically when exiting an `async with` block.
@@ -123,7 +123,7 @@ class DIBox(FactoryBox):
         factory = binding_record.async_factory or binding_record.sync_factory
         # todo: branch sync/async
         assert factory is not None, "Binding record must have at least one factory"
-        instance = await self.instances.create_instance(matched_type, matched_arg, factory, **args)
+        instance: _T = await self.instances.create_instance(matched_type, matched_arg, factory, **args) # type: ignore[assignment]
         logger.debug("Instance of %s: %s was created", matched_type, matched_arg)
         return instance
 
@@ -164,8 +164,8 @@ class DIBox(FactoryBox):
                 res[first_arg.name] = type_to_create
         return res
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, *args: Any):
+    async def __aexit__(self, *args: Any) -> None:
         await self.close()

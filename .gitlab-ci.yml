@@ -83,6 +83,14 @@ pyright:
       codequality: pyright_report.json
     expire_in: 2 days
 
+zuban:
+  stage: test
+  allow_failure: true
+  script:
+    - uv run zuban check
+  rules:
+    - *merge_request
+
 build-package:
   stage: build
   script:

@@ -57,7 +57,7 @@ class FactoryBox:
 
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.map: DIMap[BindingRecord[Any]] = DIMap()  # type -> Binding
         self.func_matchers: list[tuple[TypeMatcher[Any], BindingRecord[Any]]] = []  # predicate -> Binding
 
@@ -149,9 +149,10 @@ class FactoryBox:
         origin_type = get_origin(requested_type)
         if requested_type is None or origin_type == UnionType or origin_type == Union:
             raise ValueError(f"No binding found for ({requested_type}, {argname})")
+        requested_type = cast(type[_T], requested_type)
         for type_matcher, factory in self.func_matchers:
             if type_matcher(requested_type):
-                return factory, (requested_type, None) # type: ignore - it's not an union nor none
+                return factory, (requested_type, None)
         # return requested type as a factory if it's a class and no other match is found
         if not inspect.isclass(requested_type):
             raise ValueError(f"No binding found for ({requested_type}, {argname})")
@@ -160,13 +161,14 @@ class FactoryBox:
     def _add_binding(
         self, type_selector: TypeSelector[_T], argname: str | None, factory_record: BindingRecord[_T],
     ):
-        type_predicate = cast(TypeMatcher[_T], type_selector) if inspect.isfunction(type_selector) else None
-        if type_predicate is not None:
+        if inspect.isfunction(type_selector):
             if argname is not None:
                 raise ValueError("argname is not allowed when binding to a function")
+            type_predicate = cast(TypeMatcher[_T], type_selector)
             self.func_matchers.append((type_predicate, factory_record))
         else:
-            self.map[type_selector, argname] = factory_record
+            specific_type = cast(type[_T] | None, type_selector)
+            self.map[specific_type, argname] = factory_record
 
 def _dispatch_arguments(
     args: tuple[Any, ...],
@@ -220,18 +222,18 @@ def _dispatch_arguments(
     else:
         raise TypeError("Either target, factory, or instance must be provided")
 
-    return cast(TypeSelector[_T], type_selector), cast(str | None, argname), factory_record
+    return type_selector, argname, factory_record # type: ignore[return-value]
 
 
-def _wrap_factory_func(func: FactoryFunc[_T], **kwargs: Any) -> BindingRecord[_T]:
-    func = cast(FactoryFunc[_T], func if not kwargs else partial(func, **kwargs))
+def _wrap_factory_func(func: FactoryFunc[Any], **kwargs: Any) -> BindingRecord[Any]:
+    func = cast(FactoryFunc[Any], func if not kwargs else partial(func, **kwargs))
     if inspect.iscoroutinefunction(func):
         # If it's a coroutine function, we can only support async calls.
-        async_factory = cast(Callable[..., Awaitable[_T]], func)
+        async_factory = cast(Callable[..., Awaitable[Any]], func)
         return BindingRecord(async_factory=async_factory, sync_factory=None, signature_info=inspect.signature(func))
     else:
         # it's a sync factory, we can wrap it to support async calls as well.
-        sync_factory = cast(Callable[..., _T], func)
+        sync_factory = cast(Callable[..., Any], func)
         return BindingRecord(async_factory=None, sync_factory=sync_factory, signature_info=inspect.signature(func))
 
 

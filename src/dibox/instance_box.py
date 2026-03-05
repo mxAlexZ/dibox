@@ -1,5 +1,5 @@
 import inspect
-from typing import Any, Callable, TypeVar, cast
+from typing import Any, Callable, Self, TypeVar
 
 from .dimap import ArgNameQuery, DIMap, TypeQuery
 from .factory_box import FactoryFunc
@@ -29,7 +29,7 @@ class InstanceBox:
 
     async def create_instance(
         self,
-        requested_type: TypeQuery[_T],
+        requested_type: type[_T] | None,
         name: ArgNameQuery,
         factory: FactoryFunc[_T],
         **args: Any
@@ -37,22 +37,22 @@ class InstanceBox:
         existing_item = self._items.get((requested_type, name))
         if existing_item is not None:
             return existing_item
-        new_instance = await _start_instance(factory, args)
+        new_instance: _T = await _start_instance(factory, args)
         self._items[(requested_type, name)] = new_instance
         return new_instance
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, *args: Any):
+    async def __aexit__(self, *args: Any) -> None:
         await self.close()
 
-    async def close(self):
+    async def close(self) -> None:
         for instance in reversed(self._items.values()):
             await _shutdown_instance(instance)
         self._items.clear()
 
-async def _start_instance(factory: FactoryFunc[_T], args: dict[str, Any]) -> _T:
+async def _start_instance(factory: FactoryFunc[Any], args: dict[str, Any]) -> Any:
     instance = factory(**args)
     if inspect.isawaitable(instance):
         instance = await instance
@@ -61,7 +61,7 @@ async def _start_instance(factory: FactoryFunc[_T], args: dict[str, Any]) -> _T:
         startup_res = startup_method()
         if inspect.isawaitable(startup_res):
             await startup_res
-    return cast(_T, instance)
+    return instance
 
 async def _shutdown_instance(instance: Any):
     close_method, close_method_name = _lookup_method(instance, InstanceBox.close_methods)

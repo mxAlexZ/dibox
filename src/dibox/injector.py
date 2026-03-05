@@ -67,19 +67,19 @@ def _params_to_inject(injected_params: dict[str, type], kwds: dict[str, Any]):
             yield name, t
 
 def _make_wrapper(
-    func: MaybeAwaitableCallable[_R],
+    func: MaybeAwaitableCallable[Any],
     container: ContainerProtocol,
     injected_params: dict[str, type],
-) -> MaybeAwaitableCallable[_R]:
+) -> MaybeAwaitableCallable[Any]:
     if inspect.iscoroutinefunction(func):
-        async def async_wrapper(*args: Any, **kwds: Any) -> _R:
+        async def async_wrapper(*args: Any, **kwds: Any) -> Any:
             params_to_inject = _params_to_inject(injected_params, kwds)
             deps: dict[str, Any] = {n: await container.provide(t, n) for n, t in params_to_inject}
             return await func(*args, **{**deps, **kwds})
         return async_wrapper
     else:
-        func = cast(Callable[..., _R], func)
-        def sync_wrapper(*args: Any, **kwds: Any) -> _R:
+        func = cast(Callable[..., Any], func)
+        def sync_wrapper(*args: Any, **kwds: Any) -> Any:
             params_to_inject = _params_to_inject(injected_params, kwds)
             deps: dict[str, Any] = {n: container.get(t, n) for n, t in params_to_inject}
             return func(*args, **{**deps, **kwds})
