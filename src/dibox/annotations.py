@@ -19,17 +19,17 @@ that should not be injected by the DI container.
 """
 
 
-def get_injected_type(p: inspect.Parameter, inject_all: bool) -> type | None:
+def get_injected_type(p: inspect.Parameter, inject_all: bool) -> type[Any] | None:
     if get_origin(p.annotation) == Annotated and len(annotation_args := get_args(p.annotation)) == 2:
         if annotation_args[1] == _injected_mark:
-            return annotation_args[0]
+            return annotation_args[0] # type: ignore[no-any-return]
         elif annotation_args[1] == _not_injected_mark:
             return None
     return p.annotation if inject_all else None
 
 
-def get_injected_params(func: Callable[..., Any], inject_all: bool = False) -> dict[str, type]:
-    res: dict[str, type] = {}
+def get_injected_params(func: Callable[..., Any], inject_all: bool = False) -> dict[str, type[Any]]:
+    res: dict[str, type[Any]] = {}
     for p in inspect.signature(func).parameters.values():
         injected_type = get_injected_type(p, inject_all)
         if injected_type is not None:
@@ -37,7 +37,7 @@ def get_injected_params(func: Callable[..., Any], inject_all: bool = False) -> d
     return res
 
 
-def remove_params_from_signature(func: Callable[..., Any], params: dict[str, type]):
+def remove_params_from_signature(func: Callable[..., Any], params: dict[str, type[Any]]) -> None:
     s = inspect.signature(func)
     s = s.replace(parameters=[p for p in s.parameters.values() if p.name not in params])
     func.__signature__ = s  # type: ignore - we are intentionally modifying the signature

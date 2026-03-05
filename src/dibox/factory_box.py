@@ -160,7 +160,7 @@ class FactoryBox:
 
     def _add_binding(
         self, type_selector: TypeSelector[_T], argname: str | None, factory_record: BindingRecord[_T],
-    ):
+    ) -> None:
         if inspect.isfunction(type_selector):
             if argname is not None:
                 raise ValueError("argname is not allowed when binding to a function")
@@ -241,7 +241,7 @@ def _wrap_instance(instance: _T, **kwargs: Any) -> BindingRecord[_T]:
     if kwargs:
         raise ValueError("Cannot pass kwargs when binding to an instance")
 
-    def sync_factory():
+    def sync_factory() -> _T:
         return instance
 
     return BindingRecord(async_factory=None, sync_factory=sync_factory, signature_info=inspect.Signature())
@@ -249,11 +249,11 @@ def _wrap_instance(instance: _T, **kwargs: Any) -> BindingRecord[_T]:
 
 def _wrap_generic_target(target: BindingTarget[_T], **kwargs: Any) -> BindingRecord[_T]:
     if callable(target):
-        return _wrap_factory_func(cast(FactoryFunc[_T], target), **kwargs)
+        return _wrap_factory_func(target, **kwargs)
     else:
-        return _wrap_instance(cast(_T, target), **kwargs)
+        return _wrap_instance(target, **kwargs)
 
 
-def _forbid_kwargs(*args: Any):
+def _forbid_kwargs(*args: Any) -> None:
     if any(arg is not _MISSING for arg in args):
         raise TypeError("keyword arguments are incompatible with the used positional argument form")

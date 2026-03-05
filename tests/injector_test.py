@@ -57,7 +57,7 @@ class TestInjector:
 
         assert res_a == 10
         assert res_b.s == "test"
-        assert inspect.signature(wrapped_func).parameters.keys() == {"a"}
+        assert set(inspect.signature(wrapped_func).parameters.keys()) == {"a"}
 
 
     async def test_optout_strategy(self, dibox: DIBox):
@@ -71,7 +71,7 @@ class TestInjector:
 
         assert res_a == 10
         assert res_b.s == "test"
-        assert inspect.signature(func).parameters.keys() == {"a"}
+        assert set(inspect.signature(func).parameters.keys()) == {"a"}
 
 
     async def test_override_injected_arg(self, dibox: DIBox):

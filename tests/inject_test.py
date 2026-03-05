@@ -67,7 +67,7 @@ class TestInjectDecorator:
 
         assert res_a == 10
         assert res_foo.s == "test"
-        assert inspect.signature(wrapped_func).parameters.keys() == {"a"}
+        assert set(inspect.signature(wrapped_func).parameters.keys()) == {"a"}
 
     @pytest.mark.parametrize("decorator_style", decorator_styles)
     async def test_inject_injected_argument_override(self, decorator_style: str):
@@ -78,4 +78,4 @@ class TestInjectDecorator:
 
         assert res_a == 10
         assert res_foo.s == "override"
-        assert inspect.signature(wrapped_func).parameters.keys() == {"a"}
+        assert set(inspect.signature(wrapped_func).parameters.keys()) == {"a"}

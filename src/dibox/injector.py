@@ -1,7 +1,7 @@
 import inspect
 from enum import StrEnum
 from functools import update_wrapper
-from typing import Any, Awaitable, Callable, Protocol, TypeVar, cast, overload
+from typing import Any, Awaitable, Callable, Iterable, Protocol, TypeVar, cast, overload
 
 from .annotations import get_injected_params, remove_params_from_signature
 from .container_protocol import ContainerProtocol
@@ -46,7 +46,7 @@ class Injector:
     def __call__(self, func: Callable[..., _R]) -> Callable[..., _R]: ...
     @overload
     def __call__(self) -> InjectDecoratorProtocol: ...
-    def __call__(self, func: Callable[..., _R] | None = None):
+    def __call__(self, func: Callable[..., _R] | None = None) -> Callable[..., _R] | InjectDecoratorProtocol:
         if func is not None:
             return self._decorator(func)
         return self._decorator
@@ -55,13 +55,13 @@ class Injector:
     def inject(self, func: Callable[..., _R]) -> Callable[..., _R]: ...
     @overload
     def inject(self) -> InjectDecoratorProtocol: ...
-    def inject(self, func: Callable[..., _R] | None = None):
+    def inject(self, func: Callable[..., _R] | None = None) -> Callable[..., _R] | InjectDecoratorProtocol:
         if func is not None:
             return self._decorator(func)
         return self._decorator
 
 
-def _params_to_inject(injected_params: dict[str, type], kwds: dict[str, Any]):
+def _params_to_inject(injected_params: dict[str, type], kwds: dict[str, Any]) -> Iterable[tuple[str, type]]:
     for name, t in injected_params.items():
         if name not in kwds:
             yield name, t

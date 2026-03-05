@@ -87,7 +87,8 @@ zuban:
   stage: test
   allow_failure: true
   script:
-    - uv run zuban check
+    - uv run zuban check src --pretty
+    - uv run zuban check tests --allow-untyped-defs --allow-incomplete-defs --pretty
   rules:
     - *merge_request
 

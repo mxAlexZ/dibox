@@ -15,7 +15,7 @@ class InstanceBox:
     start_methods = ["__aenter__", "start", "__enter__"]
     close_methods = ["__aexit__", "aclose", "close", "__exit__"]
 
-    def __init__(self):
+    def __init__(self) -> None  :
         self._items = DIMap[Any]()
 
 
@@ -34,7 +34,7 @@ class InstanceBox:
         factory: FactoryFunc[_T],
         **args: Any
     ) -> _T:
-        existing_item = self._items.get((requested_type, name))
+        existing_item: _T | None = self._items.get((requested_type, name))
         if existing_item is not None:
             return existing_item
         new_instance: _T = await _start_instance(factory, args)
@@ -63,7 +63,7 @@ async def _start_instance(factory: FactoryFunc[Any], args: dict[str, Any]) -> An
             await startup_res
     return instance
 
-async def _shutdown_instance(instance: Any):
+async def _shutdown_instance(instance: Any) -> None:
     close_method, close_method_name = _lookup_method(instance, InstanceBox.close_methods)
     if close_method is not None:
         if close_method_name.startswith("__"):  # __exit__/__aexit__
