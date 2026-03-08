@@ -19,6 +19,7 @@ Async-native dependency injection framework based on type hints.
   - [2. Wire and Run](#2-wire-and-run)
 - [Advanced usage](#advanced-usage)
   - [Using Decorators for Injection](#using-decorators-for-injection)
+  - [Resource Lifecycle](#resource-lifecycle)
   - [Advanced Binding Patterns](#advanced-binding-patterns)
     - [Binding Interfaces & Instances](#binding-interfaces--instances)
     - [Factory Functions](#factory-functions)
@@ -51,7 +52,7 @@ DIBox resolves, instantiates, and injects dependencies by following naturally de
 - **Easy to Adopt:** Minimal concepts and minimal binding for most internal code.
 - **Pragmatic Auto-Wiring:** If a class can be constructed based on type hints, DIBox will build it. This convention-first approach eliminates nearly all factory boilerplate for your internal services.
 - **Async‑Native Core:** Seamlessly injects into async call chains and supports async factories out of the box.
-- **Lifecycle Automation:** Detects and runs `start()`/`close()`, or context manager hooks (`__aenter__`/`__aexit__`, `__enter__`/`__exit__`) to manage resources safely.
+- **Lifecycle Automation:** Resources start and clean up automatically. DIBox recognizes context managers (including generator-based factories) and `start`/`close` conventions.
 - **Advanced Binding Options:** Supports predicate bindings, named injections, and factory functions (with auto‑injected factory parameters).
 - **Non‑Invasive:** Works with any class using type hints—including third-party SDKs, dataclasses, and attrs — no wrappers or base classes required.
 - **No Global State Required:** Works equally well with local container instances—no hidden singletons, easy to isolate in unit tests.
@@ -62,7 +63,7 @@ DIBox resolves, instantiates, and injects dependencies by following naturally de
 DIBox requires almost no setup. Define your classes as usual—whether you use standard Python classes with `__init__`, dataclasses, or attrs models.
 
 ### 1. Define your application as usual
-DIBox can manage common lifecycle hooks, it detects and calls the commonly used methods like `start()`/`close()` or context manager methods like `__aenter__`/`__aexit__`.
+DIBox detects and manages lifecycle hooks automatically. The `Service` class below uses `start()`/`close()` — one of several supported patterns, covered in full in [Resource Lifecycle](#resource-lifecycle).
 
 ```python
 import asyncio
@@ -202,6 +203,63 @@ async def main(req: func.HttpRequest, service: Injected[ProcessingService]) -> f
 ```
 
 This pattern keeps your code clean and separates the concerns of dependency configuration from your application logic.
+
+### Resource Lifecycle
+
+DIBox acts as the coordinator for resource startup and teardown. All managed instances are started when first provided and torn down in reverse order (LIFO) when the container exits:
+
+```python
+async with box:
+    setup_bindings(box)
+    await run()
+# All managed resources are torn down here, in reverse order of creation
+```
+
+#### Class-based resources
+
+For class instances, DIBox detects lifecycle hooks automatically after construction. The detection priority is:
+
+1. **Async context manager** (`__aenter__`/`__aexit__`)
+2. **Sync context manager** (`__enter__`/`__exit__`)
+3. **`start`/`close`/`aclose` convention** — sync or async, detected by name
+
+```python
+class DatabaseClient:
+    async def start(self):
+        self.conn = await engine.connect()
+
+    async def close(self):
+        await self.conn.close()
+
+# DIBox calls start() after construction and close() on container exit
+db = await box.provide(DatabaseClient)
+```
+
+#### Factory-based teardown
+
+When setup and teardown belong together, generator factories keep them co-located. DIBox injects the yielded value and runs the post-yield code when the container exits.
+
+```python
+from contextlib import contextmanager, asynccontextmanager
+
+@contextmanager
+def create_db_session(engine: Engine) -> Iterator[Session]:
+    session = engine.connect()
+    try:
+        yield session
+    finally:
+        session.close()
+
+@asynccontextmanager
+async def create_http_client(settings: Settings) -> AsyncIterator[httpx.AsyncClient]:
+    async with httpx.AsyncClient(base_url=settings.api_url) as client:
+        yield client
+
+box.bind(Session, create_db_session)
+box.bind(httpx.AsyncClient, create_http_client)
+```
+
+Plain generator functions (without the decorator) are also accepted — DIBox wraps them automatically — but the explicit decorator is recommended for clarity.
 
 ### Advanced Binding Patterns
 DIBox shines when you need precise control over object creation. You can mix and match these patterns to handle everything from cloud clients to dynamic configuration.

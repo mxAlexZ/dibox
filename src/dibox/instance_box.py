@@ -1,22 +1,26 @@
 import inspect
-from typing import Any, Callable, Self, TypeVar
+from contextlib import AsyncExitStack
+from typing import Any, Callable, TypeVar, cast
 
 from .dimap import ArgNameQuery, DIMap, TypeQuery
-from .factory_box import FactoryFunc
+from .factory_box import BindingRecord
 
 _T = TypeVar('_T')
 
+
 class InstanceBox:
+    """Stores created instances and manages their lifecycle.
+
+    Instances are keyed by (type, name) and created via factory callables.
+    On creation, startup hooks (`__aenter__`, `start`, `__enter__`) are called if present.
+    On `close()`, shutdown hooks are called in reverse creation order.
     """
-    This class is responsible for creating, storing, and cleaning up objects. It ensures that each
-    object is instantiated only once and can be retrieved by its type and/or name.
-    As a context manager, oversees the startup and shutdown of managed objects.
-    """
-    start_methods = ["__aenter__", "start", "__enter__"]
-    close_methods = ["__aexit__", "aclose", "close", "__exit__"]
+    start_methods = ["start"]
+    close_methods = ["aclose", "close"]
 
     def __init__(self) -> None  :
         self._items = DIMap[Any]()
+        self._exit_stack = AsyncExitStack()
 
 
     def get_instance(
@@ -31,51 +35,46 @@ class InstanceBox:
         self,
         requested_type: type[_T] | None,
         name: ArgNameQuery,
-        factory: FactoryFunc[_T],
+        binding_record: BindingRecord,
         **args: Any
     ) -> _T:
-        existing_item: _T | None = self._items.get((requested_type, name))
-        if existing_item is not None:
-            return existing_item
-        new_instance: _T = await _start_instance(factory, args)
-        self._items[(requested_type, name)] = new_instance
-        return new_instance
+        factory_result = await binding_record.call_async(**args) # this can be a context manager instance
+        instance = cast(_T, await self._start_instance(factory_result))
+        self._items[(requested_type, name)] = instance
+        return instance
 
-    async def __aenter__(self) -> Self:
-        return self
-
-    async def __aexit__(self, *args: Any) -> None:
-        await self.close()
-
-    async def close(self) -> None:
-        for instance in reversed(self._items.values()):
-            await _shutdown_instance(instance)
+    async def close(self, exc_details: tuple[Any, Any, Any] = (None, None, None)) -> None:
+        # __aexit__ return values is intentionally ignored:
+        #  no single object can suppress an exception on behalf of the whole container
+        await self._exit_stack.__aexit__(*exc_details)
         self._items.clear()
 
-async def _start_instance(factory: FactoryFunc[Any], args: dict[str, Any]) -> Any:
-    instance = factory(**args)
-    if inspect.isawaitable(instance):
-        instance = await instance
-    startup_method, _ = _lookup_method(instance, InstanceBox.start_methods)
-    if startup_method is not None:
-        startup_res = startup_method()
-        if inspect.isawaitable(startup_res):
-            await startup_res
-    return instance
+    async def _start_instance(self, instance: Any) -> object:
+        if hasattr(instance, "__aenter__"):
+            return await self._exit_stack.enter_async_context(instance)
+        if hasattr(instance, "__enter__"):
+            return self._exit_stack.enter_context(instance)
+        await self._start_and_register_close(instance)
+        return instance
 
-async def _shutdown_instance(instance: Any) -> None:
-    close_method, close_method_name = _lookup_method(instance, InstanceBox.close_methods)
-    if close_method is not None:
-        if close_method_name.startswith("__"):  # __exit__/__aexit__
-            res = close_method(None, None, None)
-        else:
-            res = close_method()
-        if inspect.isawaitable(res):
-            await res
+    async def _start_and_register_close(self, instance: Any) -> None:
+        startup_method = _lookup_method(instance, self.start_methods)
+        if startup_method is not None:
+            if inspect.iscoroutinefunction(startup_method):
+                await startup_method()
+            else:
+                startup_method()
+        shutdown_method = _lookup_method(instance, self.close_methods)
+        if shutdown_method is not None:
+            if inspect.iscoroutinefunction(shutdown_method):
+                self._exit_stack.push_async_callback(shutdown_method)
+            else:
+                self._exit_stack.callback(shutdown_method)
 
-def _lookup_method(obj: Any, method_names: list[str]) -> tuple[Callable[..., Any] | None, str]:
+
+def _lookup_method(obj: object, method_names: list[str]) -> Callable[..., object] | None:
     for method_name in method_names:
-        method = getattr(obj, method_name, None)
+        method: Callable[..., object] | None = getattr(obj, method_name, None)
         if method is not None:
-            return method, method_name
-    return None, ""
+            return method
+    return None

@@ -15,7 +15,7 @@ Key points:
 - Don't suggest quick hacks or workarounds; suggest the best solution even if more complex. If there are multiple solutions, provide a short summary and let the user choose.
 - Before applying any changes: if they touch more than one function or class, or if there are multiple reasonable approaches, present a short summary of the plan/options and wait for user approval.
 - Docstrings use Google style; be concise and non-obvious. Skip docstrings for self-explanatory functions.
-
+- Both in communication, code and documentation, prioritize clarity, avoid hyperbole and marketing language, engineering jokes are fine as long as they are relevant to the context and help digesting a complex topic.
 ## Tools
 - tests: `uv run pytest`
 - type checking: `uv run pyright`

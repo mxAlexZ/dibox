@@ -35,81 +35,165 @@ def _always_true(t: type[Any]) -> bool:
 
 _service_instance = _ServiceImpl("instance")
 
-class FactoryBoxTest:
-    @pytest.mark.parametrize(
-        ("bind_args", "bind_kwargs", "requested_type", "request_arg", "expected_tag"),
-        [
-            ((_Service, _ServiceImpl), {}, _Service, None, "impl"),
-            ((_Service, _sync_factory), {}, _Service, None, "sync_f"),
-            ((_Service, _async_factory), {}, _Service, None, "async_f"),
-            ((_Service, _service_instance), {}, _Service, None, "instance"),
-            ((_Service, "arg", _ServiceImpl), {}, _Service, "arg", "impl"),
-            ((_Service, "arg", _sync_factory), {}, _Service, "arg", "sync_f"),
-            ((_Service, "arg", _async_factory), {}, _Service, "arg", "async_f"),
-            ((_Service, "arg", _service_instance), {}, _Service, "arg", "instance"),
-            ((_Service,), {"target": _ServiceImpl}, _Service, None, "impl"),
-            ((_Service,), {"factory": _sync_factory}, _Service, None, "sync_f"),
-            ((_Service,), {"instance": _service_instance}, _Service, None, "instance"),
-            ((_Service, "arg"), {"target": _ServiceImpl}, _Service, "arg", "impl"),
-            ((_Service, "arg"), {"factory": _sync_factory}, _Service, "arg", "sync_f"),
-            ((_Service, "arg"), {"instance": _service_instance}, _Service, "arg", "instance"),
-            ((_Service,), {"argname": "arg", "target": _service_instance}, _Service, "arg", "instance"),
-            ((), {"type_selector": _Service, "argname": "arg", "target": _ServiceImpl}, _Service, "arg", "impl"),
-            ((), {"argname": "arg", "target": _ServiceImpl}, None, "arg", "impl"),
-            ((_is_foo, lambda: _Foo("foo")), {}, _Foo, "foo_arg", "foo"),
-        ],
-    )
-    async def test_bind_overloads(
-        self,
-        bind_args: tuple[Any, ...],
-        bind_kwargs: dict[str, Any],
-        requested_type: type[Any] | None,
-        request_arg: str | None,
-        expected_tag: str,
-    ):
-        box = FactoryBox()
-        box.bind(*bind_args, **bind_kwargs)
-        binding, _ = box.find_binding(requested_type, request_arg)
-        tag = (await binding.call_async()).tag
-        assert tag == expected_tag
 
-    @pytest.mark.parametrize(
-        ("bind_args", "bind_kwargs", "test_name"),
-        [
-            ((_Service,), {}, "(type)"),
-            ((_Service,), {"type_selector": _Service}, "(type, type_selector=...)"),
-            ((_Service,), {"argname": "arg"}, "(type, argname=...)"),
-            # (_Service, "arg")  is actually "valid" - "arg" is treated as a target
-            ((_Service, "arg"), {"argname": "arg"}, "(type, arg, argname=...)"),
-            ((_Service, "arg"), {"type_selector": _Service}, "(type, arg, type_selector=...)"),
-            ((_Service, "arg"), {"type_selector": _Service, "target": _ServiceImpl}, "(type, arg, type_selector=..., target=...)"),  # noqa: E501
-            ((_Service, "arg"), {"argname": "arg", "target": _ServiceImpl}, "(type, arg, argname=..., target=...)"),
-            ((_Service, "arg", _ServiceImpl), {"target": _ServiceImpl}, "(type, arg, target, target=...)"),
-            ((_Service, "arg", _ServiceImpl), {"factory": _sync_factory}, "(type, arg, target, factory=...)"),
-            ((_Service, "arg", _ServiceImpl), {"instance": _service_instance}, "(type, arg, target, instance=...)"),
-            ((_Service, "arg"), {"target": _ServiceImpl, "factory": _sync_factory}, "(type, arg, target=..., factory=...)"),
-            ((_Service, "arg", _ServiceImpl, _ServiceImpl), {}, "(type, arg, target, target)"),
-        ],
-    )
-    async def test_bind_invalid_signatures(self, bind_args: tuple[Any, ...], bind_kwargs: dict[str, Any], test_name: str):
+class FactoryBoxTest:
+    def _get_valid_bind_overload_case(self, box: FactoryBox, test_id: str) -> tuple[type | None, str | None, str]:
+        # requested_type, request_arg, expected_tag
+        match test_id:
+            case "type, impl":
+                box.bind(_Service, _ServiceImpl)
+                return _Service, None, "impl"
+            case "type, sync_factory":
+                box.bind(_Service, _sync_factory)
+                return _Service, None, "sync_f"
+            case "type, async_factory":
+                box.bind(_Service, _async_factory)
+                return _Service, None, "async_f"
+            case "type, instance":
+                box.bind(_Service, _service_instance)
+                return _Service, None, "instance"
+            case "type, arg, impl":
+                box.bind(_Service, "arg", _ServiceImpl)
+                return _Service, "arg", "impl"
+            case "type, arg, sync_factory":
+                box.bind(_Service, "arg", _sync_factory)
+                return _Service, "arg", "sync_f"
+            case "type, arg, async_factory":
+                box.bind(_Service, "arg", _async_factory)
+                return _Service, "arg", "async_f"
+            case "type, arg, instance":
+                box.bind(_Service, "arg", _service_instance)
+                return _Service, "arg", "instance"
+            case "type, target=":
+                box.bind(_Service, target=_ServiceImpl)
+                return _Service, None, "impl"
+            case "type, factory=":
+                box.bind(_Service, factory=_sync_factory)
+                return _Service, None, "sync_f"
+            case "type, instance=":
+                box.bind(_Service, instance=_service_instance)
+                return _Service, None, "instance"
+            case "type, arg, target=":
+                box.bind(_Service, "arg", target=_ServiceImpl)
+                return _Service, "arg", "impl"
+            case "type, arg, factory=":
+                box.bind(_Service, "arg", factory=_sync_factory)
+                return _Service, "arg", "sync_f"
+            case "type, arg, instance=":
+                box.bind(_Service, "arg", instance=_service_instance)
+                return _Service, "arg", "instance"
+            case "type, name=, target=":
+                box.bind(_Service, name="arg", target=_service_instance)
+                return _Service, "arg", "instance"
+            case "type_selector=, name=":
+                box.bind(type_selector=_Service, name="arg", target=_ServiceImpl)
+                return _Service, "arg", "impl"
+            case "name=, target=":
+                box.bind(name="arg", target=_ServiceImpl)
+                return None, "arg", "impl"
+            case "predicate, factory":
+                box.bind(_is_foo, lambda: _Foo("foo"))
+                return _Foo, "foo_arg", "foo"
+            case _:
+                raise ValueError(f"Unknown test_id: {test_id}")
+
+    @pytest.mark.parametrize("test_id", [
+        "type, impl",
+        "type, sync_factory",
+        "type, async_factory",
+        "type, instance",
+        "type, arg, impl",
+        "type, arg, sync_factory",
+        "type, arg, async_factory",
+        "type, arg, instance",
+        "type, target=",
+        "type, factory=",
+        "type, instance=",
+        "type, arg, target=",
+        "type, arg, factory=",
+        "type, arg, instance=",
+        "type, name=, target=",
+        "type_selector=, name=",
+        "name=, target=",
+        "predicate, factory",
+    ])
+    async def test_valid_bind_overload_registers_callable_binding(self, test_id: str):
+        box = FactoryBox()
+        request_type, request_arg, expected_tag = self._get_valid_bind_overload_case(box, test_id)
+        binding, _ = box.find_binding(request_type, request_arg)
+        assert (await binding.call_async()).tag == expected_tag
+
+    def _make_conflicting_bind_overloads_case(self, box: FactoryBox, test_id: str) -> None:
+        match test_id:
+            case "(type)":
+                box.bind(_Service) # type: ignore
+            case "(type, type_selector=...)":
+                box.bind(_Service, type_selector=_Service) # type: ignore
+            case "(type, name=...)":
+                box.bind(_Service, name="arg") # type: ignore
+            # (type, "arg") is actually "valid" - "arg" is treated as a target
+            case "(type, arg, name=...)":
+                box.bind(_Service, "arg", name="arg") # type: ignore
+            case "(type, arg, type_selector=...)":
+                box.bind(_Service, "arg", type_selector=_Service) # type: ignore
+            case "(type, arg, type_selector=..., target=...)":
+                box.bind(_Service, "arg", type_selector=_Service, target=_ServiceImpl) # type: ignore
+            case "(type, arg, name=..., target=...)":
+                box.bind(_Service, "arg", name="arg", target=_ServiceImpl) # type: ignore
+            case "(type, arg, target, target=...)":
+                box.bind(_Service, "arg", _ServiceImpl, target=_ServiceImpl) # type: ignore
+            case "(type, arg, target, factory=...)":
+                box.bind(_Service, "arg", _ServiceImpl, factory=_sync_factory) # type: ignore
+            case "(type, arg, target, instance=...)":
+                box.bind(_Service, "arg", _ServiceImpl, instance=_service_instance) # type: ignore
+            case "(type, arg, target=..., factory=...)":
+                box.bind(_Service, "arg", target=_ServiceImpl, factory=_sync_factory) # type: ignore
+            case "(type, arg, target, target)":
+                box.bind(_Service, "arg", _ServiceImpl, _ServiceImpl) # type: ignore
+            case _:
+                raise ValueError(f"Unknown test_id: {test_id}")
+
+    @pytest.mark.parametrize("test_id", [
+        "(type)",
+        "(type, type_selector=...)",
+        "(type, name=...)",
+        "(type, arg, name=...)",
+        "(type, arg, type_selector=...)",
+        "(type, arg, type_selector=..., target=...)",
+        "(type, arg, name=..., target=...)",
+        "(type, arg, target, target=...)",
+        "(type, arg, target, factory=...)",
+        "(type, arg, target, instance=...)",
+        "(type, arg, target=..., factory=...)",
+        "(type, arg, target, target)",
+    ])
+    async def test_conflicting_bind_arguments_raise_type_error(self, test_id: str):
         box = FactoryBox()
         with pytest.raises(TypeError):
-            box.bind(*bind_args, **bind_kwargs)
+            self._make_conflicting_bind_overloads_case(box, test_id)
 
-    @pytest.mark.parametrize(
-        ("bind_args", "bind_kwargs", "test_name"),
-        [
-            ((_always_true,), {"argname": "arg", "target": _ServiceImpl}, "(predicate, argname=..., target=...)"),
-            ((_Service, "arg"), {"instance": _service_instance, "extra_kwarg": "extra"}, "(type, arg, instance=..., **)"),
-            ((_Service, "arg", _service_instance), {"extra_kwarg": "extra"}, "(type, arg, instance, **)"),
-        ],
-    )
-    async def test_bind_invalid_values(self, bind_args: tuple[Any, ...], bind_kwargs: dict[str, Any], test_name: str):
+    def _make_invalid_bind_argument_values_case(self, box: FactoryBox, test_id: str):
+        match test_id:
+            case "(predicate, name=..., target=...)":
+                box.bind(_always_true, name="arg", target=_ServiceImpl)
+            case "(type, arg, instance=..., **)":
+                box.bind(_Service, "arg", instance=_service_instance, extra_kwarg="extra")
+            case "(type, arg, instance, **)":
+                box.bind(_Service, "arg", _service_instance, extra_kwarg="extra")
+            case _:
+                raise ValueError(f"Unknown test_id: {test_id}")
+
+    @pytest.mark.parametrize("test_id", [
+        "(predicate, name=..., target=...)",
+        "(type, arg, instance=..., **)",
+        "(type, arg, instance, **)",
+    ])
+    async def test_invalid_bind_argument_values_raise_value_error(self, test_id: str):
         box = FactoryBox()
         with pytest.raises(ValueError, match="."):
-            box.bind(*bind_args, **bind_kwargs)
+            self._make_invalid_bind_argument_values_case(box, test_id)
 
-    async def test_bind_factory_with_additional_args(self):
+    async def test_factory_extra_args_can_be_partially_bound_at_registration(self):
         def factory(t: type, a: str, b: str):
             return t(f"{a} {b}")
 
@@ -134,7 +218,7 @@ class FactoryBoxTest:
             (_ServiceImpl, "rand_arg", _ServiceImpl, None, "impl"),
         ],
     )
-    def test_find_binding(
+    def test_find_binding_returns_correct_binding_record_and_matching_data(
         self,
         requested_type: type[Any],
         request_arg: str | None,
@@ -170,7 +254,7 @@ class FactoryBoxTest:
             (None, "arg")
         ],
     )
-    def test_find_binding_raises_on_invalid_type(self, requested_type: Any, request_arg: str | None):
+    def test_find_binding_raises_for_invalid_type(self, requested_type: Any, request_arg: str | None):
         box = FactoryBox()
         with pytest.raises(ValueError, match="No binding found"):
             box.find_binding(requested_type, request_arg)
@@ -183,7 +267,7 @@ class FactoryBoxTest:
             ((_Service, _service_instance), {}, "instance"),
         ],
     )
-    def test_sync_binding_record_callable_as_sync(
+    def test_sync_binding_is_callable_synchronously(
         self, bind_args: tuple[Any, ...], bind_kwargs: dict[str, Any], expected_tag: str
     ):
         box = FactoryBox()
@@ -194,7 +278,7 @@ class FactoryBoxTest:
 
         assert tag == expected_tag
 
-    def test_async_binding_record_raises_if_called_as_sync(self):
+    def test_async_binding_raises_when_called_synchronously(self):
         box = FactoryBox()
         box.bind(_Service, _async_factory)
         binding, _ = box.find_binding(_Service, None)

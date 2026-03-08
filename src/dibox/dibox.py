@@ -68,6 +68,8 @@ class DIBox(FactoryBox):
         create a new instance, automatically resolving and injecting all its dependencies
         based on constructor type hints. Supports async factories and lifecycle management.
 
+        TODO: _T is unknown for None type query -> We need overload with Any return type for that case.
+
         Args:
             requested_type: The type of the instance to provide.
             name: The argument name for named binding resolution. When provided,
@@ -77,11 +79,11 @@ class DIBox(FactoryBox):
         Returns:
             The existing or freshly created instance matching the type and name criteria.
         """
-        try:
-            instance = self.get(requested_type, name)
-        except KeyError:
-            instance = await self._create_instance(requested_type, name)
-        return instance
+        existing_instance = self.instances.get_instance(requested_type, name)
+        if existing_instance is not None:
+            return existing_instance
+        new_instance = await self._create_instance(requested_type, name)
+        return new_instance
 
     def get(self, requested_type: TypeQuery[_T], name: ArgNameQuery = None) -> _T:
         """Retrieves an existing instance using type and optional name matching.
@@ -108,26 +110,21 @@ class DIBox(FactoryBox):
         return instance
 
     async def close(self) -> None:
-        """Closes the container and cleans up all created instances.
-
-        This method is called automatically when exiting an `async with` block.
-        """
+        """Closes the container and cleans up all created instances."""
         await self.instances.close()
 
     async def _create_instance(self, requested_type: TypeQuery[_T], name: ArgNameQuery) -> _T:
         logger.debug("Creating instance of %s: %s...", name, requested_type)
         binding_record, (matched_type, matched_arg) = self.find_binding(requested_type, name)
         # the first argument can be used as a type of the dependency to be created
+        # That's likely needs to be done only for predicate matching, but currently we can't distinguish them
         args_override = self._bind_factory_type_argument(matched_type, binding_record)
         args = await self._provide_dependencies(binding_record, args_override)
-        factory = binding_record.async_factory or binding_record.sync_factory
-        # todo: branch sync/async
-        assert factory is not None, "Binding record must have at least one factory"
-        instance: _T = await self.instances.create_instance(matched_type, matched_arg, factory, **args) # type: ignore[assignment]
+        instance: _T = await self.instances.create_instance(matched_type, matched_arg, binding_record, **args)
         logger.debug("Instance of %s: %s was created", matched_type, matched_arg)
         return instance
 
-    async def _provide_dependencies(self, consumer: BindingRecord[Any], args_override: dict[str, Any]) -> dict[str, Any]:
+    async def _provide_dependencies(self, consumer: BindingRecord, args_override: dict[str, Any]) -> dict[str, Any]:
         args = self._list_dependencies(consumer, args_override)
         dependencies: dict[str, Any] = {}
         for arg_name, arg_type in args:
@@ -138,7 +135,7 @@ class DIBox(FactoryBox):
         return dependencies
 
     @staticmethod
-    def _list_dependencies(consumer: BindingRecord[Any], args_override: dict[str, Any]) -> list[tuple[str, type]]:
+    def _list_dependencies(consumer: BindingRecord, args_override: dict[str, Any]) -> list[tuple[str, type]]:
         res: list[tuple[str, type]] = []
         signature = consumer.signature_info
         for parameter in signature.parameters.values():
@@ -152,7 +149,7 @@ class DIBox(FactoryBox):
         return res
 
     @staticmethod
-    def _bind_factory_type_argument(type_to_create: type[Any] | None, binding_record: BindingRecord[Any]) -> dict[str, Any]:
+    def _bind_factory_type_argument(type_to_create: type[Any] | None, binding_record: BindingRecord) -> dict[str, Any]:
         # the first argument can be used as a type of the dependency to be created
         res: dict[str, Any] = {}
         signature = binding_record.signature_info
@@ -167,5 +164,13 @@ class DIBox(FactoryBox):
     async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, *args: Any) -> None:
-        await self.close()
+    async def __aexit__(self, *exc_details: Any) -> None:
+        """Tear down all managed instances in LIFO order.
+
+        Exceptions are forwarded to each managed instance's cleanup handler
+        (`__exit__`, `__aexit__`). Return values from those handlers are
+        intentionally ignored: no single managed object can suppress an exception on
+        behalf of the whole container, ensuring the exception always propagates to
+        the caller and all other cleanup handlers still receive it.
+        """
+        await self.instances.close(exc_details)
