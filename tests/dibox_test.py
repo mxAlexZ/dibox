@@ -1,12 +1,12 @@
-from contextlib import AbstractContextManager, asynccontextmanager, contextmanager
-from typing import Any, AsyncGenerator, AsyncIterator, Generator, Iterator, no_type_check
+from contextlib import AbstractContextManager, asynccontextmanager
+from typing import Any, AsyncGenerator, AsyncIterator, no_type_check
 from unittest.mock import MagicMock
 
 import pytest
 from attrs import define
 
 from dibox import DIBox, Injected
-from dibox.factory_box import FactoryFunc
+from dibox.binding_box import FactoryFunc
 
 
 @define
@@ -168,109 +168,37 @@ class DIBoxFactoriesTest:
 
 
 class DIBoxLifecycleManagementTest:
-    # TODO: move some of these tests to factory_box tests
-    lifecycle_manager_styles = [
-        "SyncContextManager",
-        "AsyncContextManager",
-        "SyncStartCloseManager",
-        "AsyncStartAcloseManager",
-        "@contextmanager",
-        "@asynccontextmanager",
-        "sync_yield_factory",
-        "async_yield_factory",
-    ]
 
-    def _make_lifecycle_manager_factory(
-        self, style: str, call_records: list[str], num: int | None = None
-    ) -> FactoryFunc[Any]:
-        enter_event = "enter" if num is None else f"enter_{num}"
-        exit_event = "exit" if num is None else f"exit_{num}"
-        class SyncContextManager(Bar):
-            def __enter__(self):
-                call_records.append(enter_event)
-                return self
-            def __exit__(self, *args: Any):
-                call_records.append(exit_event)
-
-        class AsyncContextManager(Bar):
-            async def __aenter__(self):
-                call_records.append(enter_event)
-                return self
-            async def __aexit__(self, *args: Any):
-                call_records.append(exit_event)
-
+    async def test_teardown_order_is_lifo_across_provided_instances(self):
+        call_records: list[str] = []
         class SyncStartCloseManager(Bar):
             def start(self):
-                call_records.append(enter_event)
+                call_records.append("enter_1")
             def close(self):
-                call_records.append(exit_event)
-
-        class AsyncStartAcloseManager(Bar):
-            async def start(self):
-                call_records.append(enter_event)
-            async def aclose(self):
-                call_records.append(exit_event)
-
-        @contextmanager
-        def sync_cm_factory() -> Iterator[Bar]:
-            call_records.append(enter_event)
-            yield Bar()
-            call_records.append(exit_event)
+                call_records.append("exit_1")
 
         @asynccontextmanager
         async def async_cm_factory() -> AsyncIterator[Bar]:
-            call_records.append(enter_event)
+            call_records.append("enter_2")
             yield Bar()
-            call_records.append(exit_event)
-
-        def sync_yield_factory() -> Generator[Bar, None, None]:
-            call_records.append(enter_event)
-            yield Bar()
-            call_records.append(exit_event)
+            call_records.append("exit_2")
 
         async def async_yield_factory() -> AsyncGenerator[Bar, None]:
-            call_records.append(enter_event)
+            call_records.append("enter_3")
             yield Bar()
-            call_records.append(exit_event)
+            call_records.append("exit_3")
 
-        factories: dict[str, FactoryFunc[Bar]] = {
-            "SyncContextManager": SyncContextManager,
-            "AsyncContextManager": AsyncContextManager,
-            "SyncStartCloseManager": SyncStartCloseManager,
-            "AsyncStartAcloseManager": AsyncStartAcloseManager,
-            "@contextmanager": sync_cm_factory,
-            "@asynccontextmanager": async_cm_factory,
-            "sync_yield_factory": sync_yield_factory,
-            "async_yield_factory": async_yield_factory,
-        }
-        assert factories.keys() == set(self.lifecycle_manager_styles)
-        return factories[style]
-
-    @pytest.mark.parametrize("lifecycle_manager_style", lifecycle_manager_styles)
-    async def test_startup_hook_called_on_provide_and_teardown_on_box_exit(self, lifecycle_manager_style: str):
-        calls: list[str] = []
         box = DIBox()
-        lifecycle_manager_factory = self._make_lifecycle_manager_factory(lifecycle_manager_style, calls)
-        box.bind(name="manager", factory=lifecycle_manager_factory)
-
-        async with box:
-            await box.provide(object, name="manager")  # should trigger start
-        # should trigger exit
-        assert calls == ["enter", "exit"]
-
-    async def test_teardown_order_is_lifo_across_provided_instances(self):
-        calls: list[str] = []
-        box = DIBox()
-        box.bind(name="manager_1", factory=self._make_lifecycle_manager_factory("SyncContextManager", calls, num=1))
-        box.bind(name="manager_2", factory=self._make_lifecycle_manager_factory("AsyncContextManager", calls, num=2))
-        box.bind(name="manager_3", factory=self._make_lifecycle_manager_factory("SyncStartCloseManager", calls, num=3))
+        box.bind(name="manager_1", factory=SyncStartCloseManager)
+        box.bind(name="manager_2", factory=async_cm_factory)
+        box.bind(name="manager_3", factory=async_yield_factory)
 
         async with box:
             await box.provide(object, name="manager_1")
             await box.provide(MagicMock, name="manager_2")
             await box.provide(object, name="manager_3")
 
-        assert calls == ["enter_1", "enter_2", "enter_3", "exit_3", "exit_2", "exit_1"]
+        assert call_records == ["enter_1", "enter_2", "enter_3", "exit_3", "exit_2", "exit_1"]
 
     async def test_raised_exception_forwarded_to_cm_exit(self):
         exit_mock = MagicMock(return_value=True)

@@ -2,8 +2,8 @@ import inspect
 from contextlib import AsyncExitStack
 from typing import Any, Callable, TypeVar, cast
 
+from .binding_box import BindingRecord
 from .dimap import ArgNameQuery, DIMap, TypeQuery
-from .factory_box import BindingRecord
 
 _T = TypeVar('_T')
 

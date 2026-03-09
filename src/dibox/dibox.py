@@ -2,8 +2,8 @@ import inspect
 import logging
 from typing import Any, Awaitable, Callable, Self, TypeVar, get_origin, overload
 
+from .binding_box import BindingBox, BindingRecord
 from .dimap import ArgNameQuery, TypeQuery
-from .factory_box import BindingRecord, FactoryBox
 from .injector import ArgumentStrategy, Injector
 from .instance_box import InstanceBox
 
@@ -12,7 +12,7 @@ _R = TypeVar("_R")
 logger = logging.getLogger(__name__)
 
 
-class DIBox(FactoryBox):
+class DIBox(BindingBox):
     """A dependency injection container.
 
     `DIBox` is responsible for creating and managing the lifecycle of objects

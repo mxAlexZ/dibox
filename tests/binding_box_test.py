@@ -1,10 +1,11 @@
 import asyncio
 import inspect
 from typing import Any, Union
+from unittest.mock import Mock
 
 import pytest
 
-from dibox.factory_box import FactoryBox
+from dibox.binding_box import BindingBox
 
 
 class _Service:
@@ -36,8 +37,8 @@ def _always_true(t: type[Any]) -> bool:
 _service_instance = _ServiceImpl("instance")
 
 
-class FactoryBoxTest:
-    def _get_valid_bind_overload_case(self, box: FactoryBox, test_id: str) -> tuple[type | None, str | None, str]:
+class BindingBoxTest:
+    def _get_valid_bind_overload_case(self, box: BindingBox, test_id: str) -> tuple[type | None, str | None, str]:
         # requested_type, request_arg, expected_tag
         match test_id:
             case "type, impl":
@@ -95,7 +96,7 @@ class FactoryBoxTest:
                 box.bind(_is_foo, lambda: _Foo("foo"))
                 return _Foo, "foo_arg", "foo"
             case _:
-                raise ValueError(f"Unknown test_id: {test_id}")
+                pytest.fail(f"Unknown test_id: {test_id}")
 
     @pytest.mark.parametrize("test_id", [
         "type, impl",
@@ -118,12 +119,12 @@ class FactoryBoxTest:
         "predicate, factory",
     ])
     async def test_valid_bind_overload_registers_callable_binding(self, test_id: str):
-        box = FactoryBox()
+        box = BindingBox()
         request_type, request_arg, expected_tag = self._get_valid_bind_overload_case(box, test_id)
         binding, _ = box.find_binding(request_type, request_arg)
         assert (await binding.call_async()).tag == expected_tag
 
-    def _make_conflicting_bind_overloads_case(self, box: FactoryBox, test_id: str) -> None:
+    def _make_conflicting_bind_overloads_case(self, box: BindingBox, test_id: str) -> None:
         match test_id:
             case "(type)":
                 box.bind(_Service) # type: ignore
@@ -151,7 +152,7 @@ class FactoryBoxTest:
             case "(type, arg, target, target)":
                 box.bind(_Service, "arg", _ServiceImpl, _ServiceImpl) # type: ignore
             case _:
-                raise ValueError(f"Unknown test_id: {test_id}")
+                pytest.fail(f"Unknown test_id: {test_id}")
 
     @pytest.mark.parametrize("test_id", [
         "(type)",
@@ -168,11 +169,11 @@ class FactoryBoxTest:
         "(type, arg, target, target)",
     ])
     async def test_conflicting_bind_arguments_raise_type_error(self, test_id: str):
-        box = FactoryBox()
+        box = BindingBox()
         with pytest.raises(TypeError):
             self._make_conflicting_bind_overloads_case(box, test_id)
 
-    def _make_invalid_bind_argument_values_case(self, box: FactoryBox, test_id: str):
+    def _make_invalid_bind_argument_values_case(self, box: BindingBox, test_id: str):
         match test_id:
             case "(predicate, name=..., target=...)":
                 box.bind(_always_true, name="arg", target=_ServiceImpl)
@@ -181,7 +182,7 @@ class FactoryBoxTest:
             case "(type, arg, instance, **)":
                 box.bind(_Service, "arg", _service_instance, extra_kwarg="extra")
             case _:
-                raise ValueError(f"Unknown test_id: {test_id}")
+                pytest.fail(f"Unknown test_id: {test_id}")
 
     @pytest.mark.parametrize("test_id", [
         "(predicate, name=..., target=...)",
@@ -189,7 +190,7 @@ class FactoryBoxTest:
         "(type, arg, instance, **)",
     ])
     async def test_invalid_bind_argument_values_raise_value_error(self, test_id: str):
-        box = FactoryBox()
+        box = BindingBox()
         with pytest.raises(ValueError, match="."):
             self._make_invalid_bind_argument_values_case(box, test_id)
 
@@ -197,7 +198,7 @@ class FactoryBoxTest:
         def factory(t: type, a: str, b: str):
             return t(f"{a} {b}")
 
-        box = FactoryBox()
+        box = BindingBox()
         box.bind(_Service, factory, a="hello")
 
         binding, _ = box.find_binding(_Service, "arg")
@@ -229,7 +230,7 @@ class FactoryBoxTest:
         def _foo_factory(t: type[Any]) -> _Foo:
             return _Foo(t.__name__)
 
-        box = FactoryBox()
+        box = BindingBox()
         box.bind(_Service, _ServiceImpl)
         box.bind(_Service, "impl2_arg", lambda: _ServiceImpl("impl2"))
         box.bind(_is_foo, _foo_factory)
@@ -255,7 +256,7 @@ class FactoryBoxTest:
         ],
     )
     def test_find_binding_raises_for_invalid_type(self, requested_type: Any, request_arg: str | None):
-        box = FactoryBox()
+        box = BindingBox()
         with pytest.raises(ValueError, match="No binding found"):
             box.find_binding(requested_type, request_arg)
 
@@ -270,7 +271,7 @@ class FactoryBoxTest:
     def test_sync_binding_is_callable_synchronously(
         self, bind_args: tuple[Any, ...], bind_kwargs: dict[str, Any], expected_tag: str
     ):
-        box = FactoryBox()
+        box = BindingBox()
         box.bind(*bind_args, **bind_kwargs)
         binding, _ = box.find_binding(_Service, None)
 
@@ -279,9 +280,45 @@ class FactoryBoxTest:
         assert tag == expected_tag
 
     def test_async_binding_raises_when_called_synchronously(self):
-        box = FactoryBox()
+        box = BindingBox()
         box.bind(_Service, _async_factory)
         binding, _ = box.find_binding(_Service, None)
 
         with pytest.raises(RuntimeError):
             binding.call_sync()
+
+    async def test_async_generator_factory_is_wrapped_with_asynccontextmanager(self):
+        start = Mock()
+        close = Mock()
+        async def async_gen_factory():
+            start()
+            yield _ServiceImpl("gen_f")
+            close()
+
+        box = BindingBox()
+        box.bind(_Service, async_gen_factory)
+        binding, _ = box.find_binding(_Service, None)
+
+        async with await binding.call_async() as service:
+            assert service.tag == "gen_f"
+            start.assert_called_once()
+            close.assert_not_called()
+        close.assert_called_once()
+
+    async def test_generator_factory_is_wrapped_with_contextmanager(self):
+        start = Mock()
+        close = Mock()
+        def gen_factory():
+            start()
+            yield _ServiceImpl("gen_f")
+            close()
+
+        box = BindingBox()
+        box.bind(_Service, gen_factory)
+        binding, _ = box.find_binding(_Service, None)
+
+        with binding.call_sync() as service:
+            assert service.tag == "gen_f"
+            start.assert_called_once()
+            close.assert_not_called()
+        close.assert_called_once()

@@ -57,7 +57,7 @@ class BindingRecord(NamedTuple):
         raise RuntimeError("no factory function is available")
 
 
-class FactoryBox:
+class BindingBox:
     """
     Container serving as a registry for factory functions.
 
