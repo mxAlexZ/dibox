@@ -1,134 +1,248 @@
-
 # Scopes
 
+## Problem
 
-### Problem Statement:
-Real-world applications have dependencies with different lifetimes. A database connection pool should live for the entire application, while request-specific contexts should be created per request. Container nesting creates a hierarchy where parent containers hold long-lived dependencies and children hold short-lived ones. <-- This is more about scoping, container nesting is an additional tool to help with that.
+Dependencies have different lifetimes. A database connection pool lives for the entire application; a per-request transaction context lives for one HTTP request; a user session cache sits somewhere in between. Without scope support, all instances share one flat container and one lifetime - the container's.
 
-Managing the lifecycle of dependencies is critical. A "scope" defines how long an instance of a dependency should live. For example, a database connection might be a long-lived "singleton," while a request-specific cache might be a short-lived "transient" or "request" scoped object.
+This means either:
+- The developer manually creates and tears down short-lived containers in middleware, losing the benefits of DI for those objects.
+- Or everything becomes effectively a singleton, which is incorrect for stateful, context-bound dependencies.
 
-## Idea 1: Provide function handling scopes with @inject
-To support dynamic, nested scopes with the @inject decorator, DIBox can accept either a DIBox instance or a provider function.
-- If the provider is a generator (using yield), the decorator will manage the scope’s lifetime with an async context manager, ensuring proper disposal (ideal for request-scoped containers).
-- If the provider is a regular function (using return), the decorator simply borrows the container without managing its lifecycle (ideal for session or global scopes).
+A scope mechanism should let the framework manage these lifetimes correctly, while keeping the developer's code focused on business logic rather than container plumbing.
+˘
 
-```python
-# Provider creates and yields a new container for a limited scope.
-async def request_container_provider() -> AsyncGenerator[DIBox, None]:
-    async with DIBox() as box:  # New container for the request scope
-        box.bind(RequestID, to=lambda: f"req-{random.randint(100, 999)}")
-        yield box
-    # Container is automatically closed here.
+## Key problems to solve
+- how do we define what a "scope" is?
+- how do we define to what instance box a dependency belongs to? (Note: currently each DIBox has one instance box, but we can move away from this 1-1 relationship)
+- Can we define the same dependency in multiple scopes?
+- how do we solve the problem of inter-dependencies with different scopes?
+- what is the scope entry and exit points? How do we define them? What exactly happens on entry and exit?
 
-def session_container_provider(request: Request) -> DIBox:
-    # Reuse a long-lived container for the session scope
-    box = session_boxes.get(request.session_id)
-    return box
+## Container nesting
 
-# @inject manages the container's lifecycle from the provider.
-# each handle_request call gets a new, isolated container.
-@inject(request_container_provider)
-async def handle_request(request_id: Injected[RequestID]):
-    print(f"Handling request with ID: {request_id}")
-
-# @inject passes non-injectable arguments (like request) to the provider function.
-@inject(session_container_provider)
-async def handle_session(request: Request, session_data: Injected[SessionData]):
-    print(f"Handling session {request.session_id} with data: {session_data}")
-    # session_data is resolved from the reused session container
-```
-Challenge:
-- This design introduces complexity in the @inject decorator - handling yield/return, managing arguments for the provider function.
-- May confuse users about when scopes are created and disposed.
-- Complicates optimization strategies - how to cache injected arguments?
-
-Note: Transient scope can be made explicit by providing another decorator or parameter to @inject instead of inspecting yield vs return.
-
-## Idea 2: Declarative Scopes via Decorators (ASP.NET Core style)
-In this model, the class itself declares its intended scope using a decorator. The container reads this metadata and manages the instance accordingly.
-```python
-@dibox.singleton
-class AppConfig: ...
-
-@dibox.scoped # Lives for the duration of the current scope (e.g., request)
-class RequestHandler: ...
-
-@dibox.transient # A new instance is created every time
-class NotificationClient: ...
-
-# The container automatically respects these decorators
-config1 = await box.provide(AppConfig)
-config2 = await box.provide(AppConfig) # Same instance
-```
-
-Challenge: This couples the component to the DI framework. This goes against the original phylosophy of non-invasive design. Meaning of scopes may vary between applications, leading to confusion; only singleton and transient are universally understood. Custom scopes would require additional decorators or parameters, complicating the API.
-
-## Idea 3: Provider-Defined Scopes (Guice/Dishka style)
-Here, the scope is specified during the binding process.
+Container nesting is the foundational primitive for scopes. A child container inherits bindings and resolved instances from its parent, but owns its own short-lived instances independently.
 
 ```python
-# Bindings define the scope
-box.bind(AppConfig, scope="singleton")
-box.bind(RequestHandler, scope="request")
-box.bind(NotificationClient, scope="transient") # Default
-
-# The container uses the binding's scope to manage instances
-handler1 = await request_scope.provide(RequestHandler)
-handler2 = await request_scope.provide(RequestHandler) # Same instance within the scope
-```
-Challenge: This introduces a new scope parameter to the bind method and requires the container to be aware of different scope contexts (e.g., what does "request" mean?). How are these scopes created and managed?
-
-
-## Container Nesting
-
-Benefits:
-- **Hierarchical scopes:** Natural mapping to app → request lifetimes
-- **Isolation:** Children can have bindings without polluting the parent
-- **Dependency overriding:** Children can replace parent bindings (e.g., mocks for testing) without affecting the parent.
-
-```python
-# Application-level container (long-lived)
 app_box = DIBox()
-app_box.bind(Config, prod_config)
+app_box.bind(AppConfig, load_config)
 app_box.bind(DatabasePool, create_pool)
 
-# Request-level container (short-lived, per-request)
+# Per-request: child inherits app-level bindings, adds request-specific ones.
 async with DIBox(parent=app_box) as request_box:
-    request_box.bind(RequestContext, RequestContext(request.id))
-    service = await request_box.provide(RequestContext)
-    config = await request_box.provide(Config)  # Inherited from app_box
+    request_box.bind(RequestContext, RequestContext(request_id=request.id))
+
+    ctx = await request_box.provide(RequestContext)   # owned by request_box
+    pool = await request_box.provide(DatabasePool)    # resolved from app_box
+    config = await request_box.provide(AppConfig)     # resolved from app_box
+# request_box closes here - RequestContext is torn down, app-level instances are untouched.
 ```
+Note: we can update the example with binding modules (BindingBox) once we have that API in place.
 
-A child container could inherit bindings from a parent, enabling shared dependencies (like a global `Config`) while allowing overrides.
+Note: We currently have an internal concept of "instance box" which is where resolved instances live. In the nesting design, we can either keep this 1-1 relationship (each container has one instance box) or allow multiple instance boxes per container (e.g. one per scope). Alteratively to the example above, parent and child relationship can be implemented between instance boxes instead of diboxes; the latter would manage the bindings and the scopes. We need to explore this further.
 
-### Where are instances created?
-- if the parent has a binding for `DatabasePool`, but has not created an instance yet, should the child keep it or the parent?
-- auto-wired and explicitly bound instances by a child container should be owned by the child.
+### Resolution rules
 
-### Lifecycle and ownership
-**Challenge:** How are lifecycles managed across nested containers? If a parent is closed, what happens to children? This could complicate the async context management.
-
-**Suggested approach:** Each container manages only its own instances - if a parent container is aware of its children, it can close them when it is closed, but it would create cyclic dependencies.
-Children reference parents for resolution but don't create bidirectional ownership. If a child outlives its parent, that's a usage error.
+Child asks itself first, then delegates to parent. Once an instance is created, it lives in the container that created it.
 
 ### Override semantics
+
+A child can shadow a parent binding without affecting the parent or sibling containers. This is useful for testing and for request-specific configuration:
+
 ```python
-app_box.bind(PaymentGateway, RealPaymentGateway)
-gateway1 = await app_box.provide(PaymentGateway)  # RealPaymentGateway
+app_box.bind(PaymentGateway, StripeGateway)
 
 async with DIBox(parent=app_box) as test_box:
-    test_box.bind(PaymentGateway, MockPaymentGateway)  # Override
-    gateway2 = await test_box.provide(PaymentGateway)  # MockPaymentGateway
+    test_box.bind(PaymentGateway, MockGateway)
+    gw = await test_box.provide(PaymentGateway)   # MockGateway
+    # app_box still resolves StripeGateway
 ```
 
-**Rule:** Child overrides are local and don't affect the parent or siblings.
+### Instance ownership
 
-### parent.create_child() vs. DIBox(parent=...) Decision
-- Constructor-based approach avoids cyclic dependencies:
-- Scopes should be managed by business logic, not the DI container:
-- Children has to know their parent (for dependency resolution).
+Open question: if the parent has a binding for `DatabasePool` but hasn't created an instance yet, and a child requests it - who owns the instance?
 
-**Conclusion:** The constructor-based approach `DIBox(parent=...)` is simpler and sufficient and avoids cyclic dependencies. Parent-managed lifecycles solve problems that rarely exist in practice.
+Suggested rule: the container that holds the binding owns the instance. If the binding lives in the parent, the instance is created in and owned by the parent, even if the first `provide()` call happens through a child. Auto-wired types with no explicit binding are owned by the container that triggered the resolution. This ensures the instance outlives the child, which is the expected behavior for app-level dependencies.
 
-Links
+Alternatively, stronger isolation can be implmented - only already existing instances are shared, and if a child triggers creation of a parent binding, the child owns it.
+
+
+### Lifecycle
+
+Each container manages only its own instances. Children reference parents for resolution but don't create bidirectional ownership - no cyclic dependencies.
+
+If a child outlives its parent, that is a usage error. The framework does not enforce this at runtime (no parent->child tracking), which keeps the implementation simple and avoids hidden coupling.
+
+`DIBox(parent=...)` is the preferred API over `parent.create_child()`. The constructor-based approach keeps lifecycle management in the hands of business logic (middleware, context managers) rather than burying it inside the DI container.
+
+### Possible implementation caveats
+- Messed up dependency graphs. For example, ServiceA and ServiceB are bound to a child container, but ServiceA depends on ServiceC which depends on ServiceB. If ServiceC is only bound in the parent, this creates a situation where the parent will have its own ServiceB, not a shadowed version. It is unclear how to deal with this, but it will definitely hard to debug. Ideally we should issue a warning, because this can be missing shadowing of a parent binding.
+
+## Connecting scoped containers to entry points
+
+Container nesting gives us the primitive. The remaining question is: how do entry points (route handlers, task functions) get the right container?
+
+### Manual scope management
+
+The most transparent approach. Middleware creates a child container and passes it explicitly:
+
+```python
+app_box = DIBox()
+app_box.bind(AppConfig, load_config)
+app_box.bind(DatabasePool, create_pool)
+
+@app.middleware("http")
+async def di_middleware(request: Request, call_next):
+    async with DIBox(parent=app_box) as request_box:
+        request_box.bind(RequestContext, RequestContext(request_id=request.headers["X-Request-ID"]))
+        request.state.container = request_box
+        response = await call_next(request)
+    return response
+
+@app.get("/orders")
+async def list_orders(request: Request):
+    container = request.state.container
+    service = await container.provide(OrderService)
+    return await service.list_orders()
+```
+
+This works and is easy to debug. The cost is that every handler must fish out the container manually - no DI for the handler's own arguments. (Note: the 'fishing out' is solved with contextvars idea and `@inject`. This proposal is not fully ready yet.)
+
+### Resolver-based scoping (Injector level)
+
+The `resolver` setting on `Injector` (see `injection_modes.md`) eliminates this per-handler boilerplate by selecting the container at call time:
+
+```python
+app_box = DIBox()
+app_box.bind(AppConfig, load_config)
+app_box.bind(DatabasePool, create_pool)
+
+api = Injector(resolver=lambda request: request.state.container)
+
+@app.get("/orders")
+@api.inject
+async def list_orders(request: Request, service: Injected[OrderService]):
+    return await service.list_orders()
+```
+The resolver cleanly connects the container to the injector, but
+we still need middleware to manage its lifecycle:
+```
+# Middleware still creates the child container
+@app.middleware("http")
+async def di_middleware(request: Request, call_next):
+    async with DIBox(parent=app_box) as request_box:
+        request_box.bind(RequestContext, RequestContext(request_id=request.headers["X-Request-ID"]))
+        request.state.container = request_box
+        response = await call_next(request)
+    return response
+```
+
+The middleware manages the container lifecycle; the resolver tells the injector where to find it.
+The contextvars idea mentioned before is basically a convenience layer on top of this pattern, where the resolver is implicitly `lambda: global_dibox.get()` and the middleware sets the a context var instead of request state.
+
+#### Yield vs. return: lifecycle ownership in the resolver
+
+An interesting extension from the original design notes: what if the resolver itself could manage the container lifecycle?
+
+- **Return:** resolver borrows an existing container. Lifecycle is managed elsewhere (middleware, session store). This is the common case.
+- **Yield:** resolver creates and yields a new container. The injector wraps the call in a context manager and tears down the container after the function returns.
+
+```python
+async def fresh_container(request: Request) -> AsyncIterator[DIBox]:
+    async with DIBox(parent=app_box) as box:
+        box.bind(RequestContext, RequestContext(request_id=request.headers["X-Request-ID"]))
+        yield box
+
+per_request_api = Injector(resolver=fresh_container)
+```
+
+The yield variant makes the middleware unnecessary for simple transient containers.
+
+**Tradeoff:** yield-based resolvers are convenient for quick setups but may confuse users about who owns the container. For production apps with structured middleware, the return-based resolver is likely the better default. The yield variant could be supported but should be documented as an advanced pattern.
+
+### Resolver stack (Injector level)
+Instead of a single resolver, we could introduce 'middleware' resolver for the injector itself, so we have a stack of resolvers instead of just one. In case if a wrapped function does not contain the required context for resolution, the next resolver in the stack will be used.
+
+```python
+app_injector = Injector(container=app_box) # pass a default container
+
+# decorator is just one way to add resolvers to the stack, we can also have an API like `app_injector.add_resolver(...)`
+@app_injector.resolver
+async def request_scope(request: Request) -> AsyncIterator[DIBox] | None:
+    # this resolver only handles requests
+    async with DIBox(parent=app_box) as request_box:
+        request_box.bind(RequestContext, RequestContext(request_id=request.headers["X-Request-ID"]))
+        yield request_box
+
+@app_injector.inject
+def list_orders(request: Request, service: Injected[OrderService]):
+    # will have request scope
+    return await service.list_orders()
+
+@app_injector.inject
+def health_check():
+    # will have app scope
+    return await health_service.snapshot()
+```
+
+The resolver idea only solves the problem of connecting entry points to the right container. It doesn't solve the problem of defining scopes and their boundaries!
+
+### Explicit scope declarations (Guice/Dishka style)
+
+```python
+app_box = DIBox()
+app_box.bind(AppConfig, scope=AppScope)
+app_box.bind(OrderService, scope=RequestScope)
+app_box.bind(NotificationClient, scope=TransientScope)
+```
+
+- App, request, transient are the common scopes, but users must be able to define custom scopes.
+- How are scope boundaries defined? The container needs to know when a "request" starts and ends. This either requires middleware integration or explicit `enter_scope()` / `exit_scope()` calls.
+- **How does it interact with container nesting?** If nesting already provides scope boundaries via `async with`, adding a parallel scope system risks redundancy or conflict.
+- How the scopes themselves are nested? Is it a simple hierarchy (app > request > transient) or can they be orthogonal?
+
+```
+# all suggested API is just a sketch! For example, enter_scope can be
+# implemented in many ways, it can be a free function, or implicitly called
+# by constructor of a child container (`DIBox(scope=..., parent=...)`), etc.
+
+# somewhere in middleware
+with app_box.enter_scope(RequestScope) as request_container:  # this would create a new instance box or dibox
+    # ehm. okay what do we do here?
+    request_container.resolve(OrderService)  # creates a request-scoped instance in the request container
+
+#somewhere in an app definition
+@inject
+def handler(service: Injected[OrderService]):
+    # how do we get the right container here? Get it through a context variable that tracks the current scope?
+    service = request_container.resolve(OrderService)  # how do we get request_container here?
+```
+
+Note: we are strict typed library, so scopes should be real types that typecheckers can check.
+
+## Afterthoughts
+After writing few scenarios as a sketch, it is clear that container nesting is the core primitive for scopes. It gives us explicit boundaries and instance ownership — `async with DIBox(parent=...)` is both the scope boundary and the lifecycle manager. Adding a parallel named-scope system with `scope=` parameter for `bind(...)` creates two ways to express the same thing and raises questions nobody has good answers to (who manages scope lifecycle? how do named scopes nest?). Container nesting already answers these structurally.
+
+## Priority ranking (as a user building real things)
+
+1. `DIBox(parent=...)` — the foundation. Without nesting, nothing else matters. This gives scope boundaries and instance isolation with zero new concepts.
+
+2. `container.call(func, **explicit_args)` — the biggest DX win for pipeline/orchestration code. Greedy resolution eliminates chains of `provide()` calls and doesn't require @inject on internal helpers.
+
+3. Contextvar-based `@inject` — evolves `global_dibox` from a singleton into a scope-aware contextvar stack. Entering `async with DIBox(parent=...)` sets the "current" container; `@inject` resolves from it. This is the bridge for framework entry points (routes, CLI commands, task handlers).
+
+
+## What to skip for now
+
+- `scope=` on `bind()` — redundant with nesting. Creates a second conceptual axis.
+- Named scope enums (`RequestScope`, `SessionScope`) — framework-specific vocabulary, not the primitives a generic library should provide.
+- Resolver stack / middleware chain — premature. A single resolver (or contextvar default) covers 95% of real cases.
+
+The key insight from the pipeline examples: scopes aren't about "request" vs "session" — they're about **ownership boundaries for resources that must be created and torn down together**. GPU contexts, temp directories, tenant DB connections, job trackers. Container nesting makes these boundaries explicit in the code structure itself, which is both simpler and more debuggable than declarative scope annotations.
+
+## Links
+
 - [Dishka Scopes](https://dishka.readthedocs.io/en/latest/advanced/scopes.html)
+- [Google Guice Scopes](https://github.com/google/guice/wiki/Scopes)
+- [dependency-injector Wiring](https://python-dependency-injector.ets-labs.org/wiring.html)
+- [FastAPI Dependency Injection](https://fastapi.tiangolo.com/tutorial/dependencies/)
+- [.NET Dependency Injection Lifetimes](https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection#service-lifetimes)

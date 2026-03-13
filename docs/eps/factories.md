@@ -16,7 +16,3 @@ async def handle_user_request(user: Injected[User], user_id: int):
     # The factory can use request data to create the user instance
     print(f"Handling request for user: {user.name}")
 ```
-
-
-# Yielding objects from factories
-If a factory function is a generator (using `yield`), the container can manage its lifecycle using an async context manager.

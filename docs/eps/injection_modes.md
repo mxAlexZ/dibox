@@ -1,94 +1,89 @@
-# @inject decorator customization and usage
+## Inject Decorator API
 
-## Old (current) behavior and motivation for change:
+### Motivation
+
+The original decorator style required per-function configuration:
+
 ```python
-@inject()
-def my_function(arg1: Injected[Type1], arg2: Injected[Type2]):
-    ...
+@inject(container, mode)
+def route_a(...): ...
 
-@inject_all(container, InjectMode.All)
-def my_function(arg1: Type1, arg2: Type2, arg3: NonInjected[Type3]):
-    ...
-
-# custom context-aware injection (wasn't implemented)
-@inject(lambda request: create_request_scoped_container(request)):
-def my_function(requestt , arg2: Injected[Type2]):
-    ...
+@inject(container, mode)
+def route_b(...): ...
 ```
 
-Our current `@inject` API requires developers to repeatedly declare the resolution strategy and injection modes at the site of every decorated function. When integrating with frameworks like FastAPI (which requires destructive signature modifications to hide injected args) or building request-scoped applications, this leads to heavy boilerplate `@inject( ...)` on every single route.
+This causes repetitive boilerplate and makes architectural changes expensive (switching container strategy means editing many entry points).
 
+For import-time integration with frameworks (FastAPI, Typer), decorators also need to cooperate with strict signature inspection. That is why marker annotations (`Injected[...]` / `NotInjected[...]`) exist: they communicate DI intent explicitly in a context where the runtime container state is not fully available yet.
 
-# Design Proposal: Dual-Paradigm Dependency Resolution (Declarative vs. Imperative)
+The direction here is progressive disclosure:
+- simple apps should work with minimal ceremony,
+- larger apps should be able to centralise policy once per architectural domain.
 
-## Motivation:
-A robust Dependency Injection framework must support two distinct architectural phases: Import-Time (when integrating with external frameworks like FastAPI/Typer that rely on static signature analysis) and Runtime (when executing internal domain logic where the container's state is fully known).
+### Convenience decorators
 
-Core Philosophy: Progressive Disclosure of Complexity
-The framework must provide a frictionless, zero-configuration experience for the majority of standard use cases (scripts, simple apps), while offering powerful, highly configurable abstractions for the remaining complex use cases. Therefore, basic use cases should require minimal boilerplate and no addtional abstractions - it should be enough to use only dibox methods.
-
-## The Injector decorator API (Declarative / Import-Time)
-
-Motivation: External frameworks (like FastAPI or Typer) use strict static analysis on function signatures at import-time. The injection decorator acts as a bridge between the framework's HTTP/CLI routers and our DI system. Because it is "blind" to the runtime container state at import-time, it relies on explicit Strategy configurations, like `Injected[...]` annotations. It manages __signature__ mutation (to hide injected args from OpenAPI/CLIs) and defines how to resolve the container dynamically at runtime (e.g., extracting from a Request object or a contextvar).
-
-
-## Convenience Decorators
-
-- `@inject` (global scope)
-    Purpose: The zero-boilerplate option. Under the hood, it creates a default Injector linked to a global container instance. From historical point of view, this is the original `@inject` behavior, but it should be changed from being bound to a single global container to retrieving the container from contextvars.
-
-    Example:
-    ```python
-    @inject
-    def run_report(db: Injected[DB]): ...
-    ```
-
+The encouraged default forms are:
+- `@inject`
 - `@container.inject`
 
-    Purpose: Convenience wrapper. For simple applications relying on a global container, this provides a zero-configuration decorator. Under the hood, it creates a default Injector linked to itself.
+`@inject` is currently backed by `global_dibox`, and the accepted backlog item is to move it to contextvar-based container resolution. Once that lands, plain `@inject` should cover more real-world cases without manual wiring.
 
-    Example:
-    ```python
-    @container.inject
-    def run_report(db: Injected[DB]): ...
-    ```
+`@container.inject` keeps the same low ceremony while making container ownership explicit.
 
-## Injector: A reusable, configurable decorator factory that encapsulates both the container resolution strategy and the injection mode.
-Instead of configuring the decorator at the function level (e.g. `@inject_all(container, InjectMode.All)`), developers instantiate an Injector once per architectural domain (e.g., one for the API layer, one for background workers). This object stores the container resolution strategy (e.g., extracting from a request or a contextvar) and the injection mode (e.g., destructive vs. adding default values). It then exposes an .inject method that acts as the decorator.
+### Injector as domain-level configuration
 
-- `@api or @api.inject`
+`Injector` is for cases where you want one reusable policy per architectural domain (for example app-level routes vs. session-level routes), then apply it consistently at entry points.
 
-    Purpose: Applies the configured injection rules to the route or entry point. Modifies the __signature__ to hide injected arguments from OpenAPI/CLI parsers, and resolves the container dynamically at runtime (e.g., via contextvars or request.state).
+```python
+global_container = DIBox()
 
-    Example:
-    ```python
-    global_container = DIBox()
-    app_api = Injector(
-        container=global_container, # Passes the instance directly!
-        signature=SignatureMode.DESTRUCTIVE
-    )
-    # 2. Session-Level Setup for dependencies that require context (e.g., tied to an active HTTP request/session).
-    session_api = Injector(
-        resolver=lambda request: request.state.session_container,
-        signature=SignatureMode.DESTRUCTIVE
-    )
+app_api = Injector(
+    container=global_container
+)
 
-    @app_api
-    async def get_system_config(config: Injected[AppConfig]):
-        """
-        Level 1 Complexity: Zero context required.
-        The Injector just pulls from the static `global_container` passed at import time.
-        """
-        return config.get_settings()
+session_api = Injector(
+    resolver=lambda request: request.state.session_container
+)
 
-    @session_api
-    async def update_user_cart(request: Request, cart: Injected[ShoppingCart]):
-        """
-        Level 2 Complexity: Highly context-aware.
-        The Injector dynamically executes the resolver to find the container for this specific user.
-        """
-        return cart.add_item()
-    ```
+@app_api.inject
+async def get_system_config(config: Injected[AppConfig]):
+    return config.get_settings()
+
+@session_api.inject
+async def update_user_cart(request: Request, cart: Injected[ShoppingCart]):
+    return cart.add_item()
+```
+
+`@injector` (without `.inject`) is supported and should remain supported because it costs little, but `@injector.inject` is the canonical documented form, consistent with `@container.inject`.
+
+`ArgumentStrategy` exists in the current implementation (`OPT_IN` default, `OPT_OUT` available), but it is not the core value proposition of `Injector`. In practice, `resolver` and signature behavior are the bigger differentiators for framework and scoped usage.
+
+### Planned: context-aware injection via resolver
+
+`resolver` is one of the main missing features and the key enabler for scoped/container-per-context patterns.
+
+Without resolver, `Injector` only works with a container known at import time. With resolver, container selection moves to call time, which allows patterns like per-session or per-request containers while keeping route handlers clean.
+
+Design intent:
+- `container=` for static, import-time known container.
+- `resolver=` for context-aware, runtime-selected container.
+- exactly one of them should be provided.
+
+This connects directly to scope support: resolver is the bridge between scoped container lifecycle and decorator-based entry points.
+
+### Planned: non-destructive signature mode
+
+Current implementation is always destructive: injected params are removed from `__signature__`.
+
+Potential non-destructive mode would keep all parameters visible and inject via defaults/call-time filling.
+
+Demand perspective:
+- likely lower demand for FastAPI/Typer entry points (destructive mode is usually preferred there),
+- potentially meaningful for internal tooling, debugging, reflection-heavy code, and teams that treat explicit callable signatures as part of developer ergonomics.
+
+So this looks less like a universal must-have and more like a targeted opt-in capability. It is still worth planning, but probably after resolver.
+
+Note: `SignatureModification` already exists in source as a placeholder and is not wired yet.
 
 
 ## Imperative / Runtime-Aware API (container.call and container.partial) and greedy resolution
