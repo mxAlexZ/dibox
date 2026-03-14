@@ -25,6 +25,11 @@ Async-native dependency injection framework based on type hints.
     - [Factory Functions](#factory-functions)
     - [Named dependencies](#named-dependencies)
     - [Dynamic Predicate-Based Binding](#dynamic-predicate-based-binding)
+  - [Binding Modules](#binding-modules)
+    - [Organizing bindings by feature](#organizing-bindings-by-feature)
+    - [Reusing modules across contexts](#reusing-modules-across-contexts)
+    - [Overriding bindings for tests](#overriding-bindings-for-tests)
+    - [Resolution order](#resolution-order)
 - [Why use DIBox?](#why-use-dibox)
   - [The Power of Auto-Wiring](#the-power-of-auto-wiring)
   - [Comparison with Other Frameworks](#comparison-with-other-frameworks)
@@ -41,7 +46,7 @@ Async-native dependency injection framework based on type hints.
 pip install dibox
 ```
 
-Requires Python 3.10+.
+Requires Python 3.11+.
 
 ## What is DIBox?
 DIBox is an async‑native dependency injection container that uses standard Python type hints to build and manage your service dependency graph automatically. The core philosophy is to remove factory and wiring boilerplate so you can focus on application logic.
@@ -53,7 +58,7 @@ DIBox resolves, instantiates, and injects dependencies by following naturally de
 - **Pragmatic Auto-Wiring:** If a class can be constructed based on type hints, DIBox will build it. This convention-first approach eliminates nearly all factory boilerplate for your internal services.
 - **Async‑Native Core:** Seamlessly injects into async call chains and supports async factories out of the box.
 - **Lifecycle Automation:** Resources start and clean up automatically. DIBox recognizes context managers (including generator-based factories) and `start`/`close` conventions.
-- **Advanced Binding Options:** Supports predicate bindings, named injections, and factory functions (with auto‑injected factory parameters).
+- **Advanced Binding Options:** Supports predicate bindings, named injections, factory functions (with auto‑injected factory parameters), and modular binding organization.
 - **Non‑Invasive:** Works with any class using type hints—including third-party SDKs, dataclasses, and attrs — no wrappers or base classes required.
 - **No Global State Required:** Works equally well with local container instances—no hidden singletons, easy to isolate in unit tests.
 - **Two resolution styles:** Declarative decorators (like `@box.inject`) provide signature-aware, import-time integration for frameworks; imperative `box.provide(...)` gives direct runtime control.
@@ -169,11 +174,6 @@ async def specific_handler(service: Injected[Service]):
 
 #### 2. Advanced Configuration: `Injector`
 When you need to apply the same injection configuration across multiple functions—especially in framework integrations—creating a reusable `Injector` is the best approach. An `Injector` encapsulates the injection strategy, so you don't have to repeat it.
-
-This is particularly useful for:
--   **Framework Integration:** Creating a dedicated injector for your API layer (e.g., FastAPI routes).
--   **Consistent Behavior:** Ensuring all functions in a specific module use the same injection settings.
--   **Future-Proofing:** `Injector` will support advanced features like context-aware container resolvers (e.g., creating a new container for each web request).
 
 **Example: Creating a Reusable API Injector**
 
@@ -336,6 +336,122 @@ app_settings = await box.provide(AppSettings)
 db_settings = await box.provide(DBSettings)
 ```
 
+### Binding Modules
+
+A `BindingBox` is a portable set of binding rules. Define it once, compose it wherever that context is needed — a pipeline stage, a background worker, a CLI command, a test.
+
+#### Organizing bindings by feature
+
+```python
+# storage/deps.py
+from dibox import BindingBox
+
+storage_bindings = BindingBox()
+storage_bindings.bind(StorageClient, S3StorageClient)
+storage_bindings.bind(BlobIndex)
+```
+
+```python
+# ml/deps.py
+from dibox import BindingBox
+
+ml_bindings = BindingBox()
+ml_bindings.bind(ModelRegistry)
+ml_bindings.bind(Classifier)
+```
+
+```python
+# main.py
+from dibox import DIBox
+from storage.deps import storage_bindings
+from ml.deps import ml_bindings
+
+async with DIBox() as box:
+    box.bind(AppConfig, instance=load_config())  # raw config — bound directly
+    box.add_bindings(storage_bindings)
+    box.add_bindings(ml_bindings)
+
+    classifier = await box.provide(Classifier)
+```
+
+#### Reusing modules across contexts
+
+A `BindingBox` holds binding *rules*, not live resources — it's a plain Python object, independent of any specific container. The same module can be composed into different containers in different contexts without duplication, and because it carries no open connections or handles, it can be imported in any process. This makes it the natural contract between an orchestrator and its workers.
+
+To make this concrete, here's a pipeline stage running as a [Ray](https://www.ray.io/) remote function — a function dispatched to a separate worker process by the framework.
+
+Without modules, every worker duplicates the same setup:
+
+```python
+# pipeline/stages.py — defined once, importable from anywhere
+enhance_bindings = BindingBox()
+enhance_bindings.bind(GPUContext)
+enhance_bindings.bind(Enhancer)
+```
+
+```python
+@ray.remote  # runs this function in a separate worker process
+def enhance_v1(config: AppConfig, tiles: list[bytes]) -> list[bytes]:
+    async def _run() -> list[bytes]:
+        box = DIBox()
+        box.bind(AppConfig, instance=config)
+        box.bind(GPUContext)  # repeated in every worker
+        box.bind(Enhancer)    # and again here
+        async with box:
+            enhancer = await box.provide(Enhancer)
+            return await enhancer.enhance(tiles)
+    return asyncio.run(_run())
+```
+
+With modules, the worker declares what context it needs in one line:
+
+```python
+@ray.remote  # runs this function in a separate worker process
+def enhance_v2(config: AppConfig, tiles: list[bytes]) -> list[bytes]:
+    async def _run() -> list[bytes]:
+        box = DIBox()
+        box.bind(AppConfig, instance=config)
+        box.add_bindings(enhance_bindings)  # same module — no duplication
+        async with box:
+            enhancer = await box.provide(Enhancer)
+            return await enhancer.enhance(tiles)
+    return asyncio.run(_run())
+```
+
+The same module also works in-process — for example, as a scoped stage container in the main pipeline:
+
+```python
+async with DIBox(parent=run_box) as stage:
+    stage.add_bindings(enhance_bindings)
+    enhancer = await stage.provide(Enhancer)
+    tiles = await enhancer.enhance(tiles)
+# GPUContext released when the stage exits
+```
+
+#### Overriding bindings for tests
+
+When modules are composed, the last registered wins. This is useful for integration tests: register the production modules first, then add a module with fakes on top without touching the original module.
+
+```python
+# tests/fakes.py
+fake_storage = BindingBox()
+fake_storage.bind(StorageClient, InMemoryStorageClient)  # no S3 in tests
+
+# tests/test_classifier.py
+async def test_classifier():
+    async with DIBox() as box:
+        box.bind(AppConfig, instance=test_config)
+        box.add_bindings(ml_bindings)      # real ML module
+        box.add_bindings(fake_storage)     # replaces S3StorageClient — last wins
+
+        classifier = await box.provide(Classifier)
+        ...
+```
+
+#### Resolution order
+
+When the same type is bound in multiple places, **last registered wins**: container's own `bind()` calls always take highest precedence, then modules in reverse registration order. If no binding matches at all, DIBox falls back to using the requested type as its own factory — this is what makes `await box.provide(SomeService)` work without an explicit `box.bind(SomeService)`.
+
 ## Why use DIBox?
 ### The Power of Auto-Wiring
 Dependency Injection (DI) decouples your high-level business logic from low-level implementation details (like database drivers or API clients). This makes your code modular and effortless to test—you can easily swap a real database for a mock during unit tests.
@@ -364,7 +480,7 @@ There are many great DI frameworks for Python out there. Here is why you might c
 
 - **vs. [Dishka](https://dishka.readthedocs.io/en/latest/)**
   - **The Approach:** Dishka is a powerful DI framework built around a first-class scoping system and explicit `Provider` classes. This gives you fine-grained control over dependency lifetimes and structure, with ready-made integrations for many popular frameworks.
-  - **The DIBox Difference:** DIBox offers a simpler, more minimal API. Instead of `Provider` classes, DIBox auto-wires any class with a type-annotated constructor, so you only bind what can't be inferred (e.g., interfaces, raw values). This convention-over-configuration approach reduces boilerplate for common cases. DIBox also offers unique features like predicate-based binding and named-argument injection. However, Dishka currently has a more mature feature set, including a robust scoping model, modular provider composition, and a dependency graph visualizer. If those features are critical for your project right now, Dishka is an excellent choice. Scopes and modules are on the DIBox roadmap.
+  - **The DIBox Difference:** DIBox offers a simpler, more minimal API. Instead of `Provider` classes, DIBox auto-wires any class with a type-annotated constructor, so you only bind what can't be inferred (e.g., interfaces, raw values). This convention-over-configuration approach reduces boilerplate for common cases. DIBox also offers unique features like predicate-based binding and named-argument injection. However, Dishka currently has a more mature feature set, including a robust scoping model and a dependency graph visualizer. If those features are critical for your project right now, Dishka is an excellent choice. Scopes are on the DIBox roadmap.
 
 - **vs. [FastAPI's Depends](https://fastapi.tiangolo.com/tutorial/dependencies/)**
   - **The Approach:** FastAPI revolutionized Python development with its intuitive, type-hint-based dependency injection. It is the primary inspiration behind DIBox. FastAPI's dependency injection system is tightly integrated with its web framework. It uses the `Depends` marker to declare dependencies in path operation functions.

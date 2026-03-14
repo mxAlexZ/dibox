@@ -156,19 +156,17 @@ class BindingBox:
 
     def find_binding(
         self, requested_type: TypeQuery[Any] | None, name: str | None
-    ) -> tuple[BindingRecord, DIMapKey[Any]]:
+    ) -> tuple[BindingRecord | None, DIMapKey[Any]]:
         # look in the map type->binding
         match = self.map.find_match(requested_type, name)
         if match is not None:
             return match
         # try predicate-based bindings
-        if not isinstance(requested_type, type):
-            raise ValueError(f"No binding found for ({requested_type}, {name})")
-        for type_matcher, factory in self.func_matchers:
-            if type_matcher(requested_type):
-                return factory, (requested_type, None)
-        # return requested type as a factory if it's a class and no other match is found
-        return _create_binding_record_for_factory(requested_type), (requested_type, None)
+        if isinstance(requested_type, type):
+            for type_matcher, factory in self.func_matchers:
+                if type_matcher(requested_type):
+                    return factory, (requested_type, None)
+        return None, (None, None)
 
     def _add_binding(
         self, type_selector: TypeSelector[_T], name: str | None, factory_record: BindingRecord,

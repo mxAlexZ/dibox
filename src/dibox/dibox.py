@@ -3,7 +3,7 @@ import logging
 from typing import Any, Awaitable, Callable, Self, TypeVar, get_origin, overload
 
 from .binding_box import BindingBox, BindingRecord
-from .dimap import ArgNameQuery, TypeQuery
+from .dimap import ArgNameQuery, DIMapKey, TypeQuery
 from .injector import ArgumentStrategy, Injector
 from .instance_box import InstanceBox
 
@@ -43,9 +43,49 @@ class DIBox(BindingBox):
     def __init__(self, inject_mode: ArgumentStrategy = ArgumentStrategy.OPT_IN) -> None:
         self.instances = InstanceBox()
         self.injector = Injector(self, inject_mode)
+        self.modules: list[BindingBox] = []
         super().__init__()
 
+    def add_bindings(self, binding_box: BindingBox) -> None:
+        """Registers a reusable binding module (`BindingBox`) on this container.
+
+        A module is a portable set of binding rules that can be shared across
+        contexts (for example, app entry points, workers, and tests).
+
+        Resolution order is explicit:
+        - direct container bindings added via `bind()` have highest precedence,
+        - added modules are searched in reverse registration order,
+        - among modules, the last added wins.
+
+        Args:
+            binding_box: Module to append to the container's module chain.
+        """
+        self.modules.append(binding_box)
+
+    def find_binding(
+        self, requested_type: TypeQuery[Any] | None, name: str | None
+    ) -> tuple[BindingRecord | None, DIMapKey[Any]]:
+        binding_record, key = super().find_binding(requested_type, name)
+        if binding_record is not None:
+            return binding_record, key
+        for module in reversed(self.modules):
+            binding_record, key = module.find_binding(requested_type, name)
+            if binding_record is not None:
+                return binding_record, key
+        return None, (None, None)  # no binding found
+
     def inject(self, func: Callable[..., _R]) -> Callable[..., _R]:
+        """Decorates a function so missing injectable arguments come from this container.
+
+        In `OPT_IN` mode, only parameters marked with `Injected[...]` are
+        injected. In `OPT_OUT` mode, all typed parameters are considered
+        injectable unless explicitly marked otherwise.
+
+        The wrapped function keeps its runtime behavior, but injected
+        parameters are removed from the visible signature. This is useful for
+        framework entry points that inspect signatures (for example, web or CLI
+        handlers).
+        """
         return self.injector()(func)
 
     @overload
@@ -116,6 +156,17 @@ class DIBox(BindingBox):
     async def _create_instance(self, requested_type: TypeQuery[_T], name: ArgNameQuery) -> _T:
         logger.debug("Creating instance of %s: %s...", name, requested_type)
         binding_record, (matched_type, matched_arg) = self.find_binding(requested_type, name)
+        if binding_record is None:
+            # auto-bind to the requested type if it's a concrete class
+            if not isinstance(requested_type, type):
+                raise ValueError(f"No binding found for ({requested_type}, {name})")
+            binding_record = BindingRecord(
+                async_factory=None,
+                sync_factory=requested_type,
+                signature_info=inspect.signature(requested_type)
+            )
+            matched_type, matched_arg = requested_type, None
+
         # the first argument can be used as a type of the dependency to be created
         # That's likely needs to be done only for predicate matching, but currently we can't distinguish them
         args_override = self._bind_factory_type_argument(matched_type, binding_record)

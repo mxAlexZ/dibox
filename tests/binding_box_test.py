@@ -122,6 +122,7 @@ class BindingBoxTest:
         box = BindingBox()
         request_type, request_arg, expected_tag = self._get_valid_bind_overload_case(box, test_id)
         binding, _ = box.find_binding(request_type, request_arg)
+        assert binding is not None
         assert (await binding.call_async()).tag == expected_tag
 
     def _make_conflicting_bind_overloads_case(self, box: BindingBox, test_id: str) -> None:
@@ -202,6 +203,7 @@ class BindingBoxTest:
         box.bind(_Service, factory, a="hello")
 
         binding, _ = box.find_binding(_Service, "arg")
+        assert binding is not None
         # 'a' is already bound and 'b' needs to be provided
         tag = binding.call_sync(_ServiceImpl, b="world").tag
         assert tag == "hello world"
@@ -215,8 +217,6 @@ class BindingBoxTest:
             (_Foo2, "foo_arg", _Foo2, None, "_Foo2"),
             (_Service | str, "rand_arg", _Service, None, "impl"),
             (Union[_Service, str], "rand_arg", _Service, None, "impl"),
-            # "implicit registeration", it's one of the questionable decisions made.
-            (_ServiceImpl, "rand_arg", _ServiceImpl, None, "impl"),
         ],
     )
     def test_find_binding_returns_correct_binding_record_and_matching_data(
@@ -237,6 +237,7 @@ class BindingBoxTest:
 
         binding, (matched_type, matched_arg) = box.find_binding(requested_type, request_arg)
 
+        assert binding is not None
         assert binding.sync_factory is not None
         try:
             tag = binding.call_sync().tag
@@ -247,18 +248,10 @@ class BindingBoxTest:
         assert matched_type == expected_matched_type
         assert matched_arg == expected_matched_arg
 
-    @pytest.mark.parametrize(
-        ("requested_type", "request_arg"),
-        [
-            ("I am a string, not a type", None),
-            (_Foo | _Foo2, "foo_arg"),
-            (None, "arg")
-        ],
-    )
-    def test_find_binding_raises_for_invalid_type(self, requested_type: Any, request_arg: str | None):
+    def test_find_binding_returns_none_when_no_match(self):
         box = BindingBox()
-        with pytest.raises(ValueError, match="No binding found"):
-            box.find_binding(requested_type, request_arg)
+        binding, _ = box.find_binding(_ServiceImpl, "rand_arg")
+        assert binding is None
 
     @pytest.mark.parametrize(
         ("bind_args", "bind_kwargs", "expected_tag"),
@@ -274,6 +267,7 @@ class BindingBoxTest:
         box = BindingBox()
         box.bind(*bind_args, **bind_kwargs)
         binding, _ = box.find_binding(_Service, None)
+        assert binding is not None
 
         tag = binding.call_sync().tag
 
@@ -283,6 +277,7 @@ class BindingBoxTest:
         box = BindingBox()
         box.bind(_Service, _async_factory)
         binding, _ = box.find_binding(_Service, None)
+        assert binding is not None
 
         with pytest.raises(RuntimeError):
             binding.call_sync()
@@ -298,6 +293,7 @@ class BindingBoxTest:
         box = BindingBox()
         box.bind(_Service, async_gen_factory)
         binding, _ = box.find_binding(_Service, None)
+        assert binding is not None
 
         async with await binding.call_async() as service:
             assert service.tag == "gen_f"
@@ -316,6 +312,7 @@ class BindingBoxTest:
         box = BindingBox()
         box.bind(_Service, gen_factory)
         binding, _ = box.find_binding(_Service, None)
+        assert binding is not None
 
         with binding.call_sync() as service:
             assert service.tag == "gen_f"

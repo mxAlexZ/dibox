@@ -1,3 +1,4 @@
+# type: ignore
 """
 Scopes skeleton: thinking as a user, not a library author.
 

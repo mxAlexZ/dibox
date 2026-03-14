@@ -1,4 +1,5 @@
 from .annotations import Injected, NotInjected
+from .binding_box import BindingBox, BindingRecord
 from .container_protocol import ContainerProtocol
 from .dibox import DIBox
 from .global_box import global_dibox, inject
@@ -14,4 +15,6 @@ __all__ = [
     "ArgumentStrategy",
     "InjectDecoratorProtocol",
     "Injector",
+    "BindingBox",
+    "BindingRecord",
 ]

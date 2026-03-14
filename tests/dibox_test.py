@@ -6,7 +6,7 @@ import pytest
 from attrs import define
 
 from dibox import DIBox, Injected
-from dibox.binding_box import FactoryFunc
+from dibox.binding_box import BindingBox, FactoryFunc
 
 
 @define
@@ -22,32 +22,7 @@ class Foo:
         self.bar = bar
 
 
-class DIBoxTest:
-    async def test_unresolvable_constructor_arg_raises_on_provide(self):
-        box = DIBox()
-        class MandatoryBar:
-            def __init__(self, s: Any): ...
-        with pytest.raises(TypeError):
-            await box.provide(MandatoryBar)
-
-    @pytest.mark.parametrize(
-        ("type_request", "arg_name"),
-        [
-            (Bar, None),
-            (Bar, "arg"),
-            (Bar | Foo, None)
-        ]
-    )
-    async def test_provided_instance_is_reused_on_subsequent_provide(self, type_request: type[Any], arg_name: str | None):
-        box = DIBox()
-        def bar_factory() -> Bar:
-            return Bar(s="test")
-        box.bind(Bar, factory=bar_factory)
-
-        bar_instance1 = await box.provide(type_request, arg_name)
-        bar_instance2 = await box.provide(type_request, arg_name)
-
-        assert bar_instance1 is bar_instance2
+class DIBoxProvideTest:
 
     async def test_bound_subclass_is_instantiated_as_implementation(self):
         box = DIBox()
@@ -70,6 +45,58 @@ class DIBoxTest:
         assert isinstance(foo_instance, Foo)
         assert foo_instance.bar is bar_instance
 
+    async def test_unregistered_concrete_type_is_auto_bound(self):
+        box = DIBox()
+        bar = await box.provide(Bar)
+        assert isinstance(bar, Bar)
+
+    async def test_unregistered_concrete_type_with_deps_is_auto_bound(self):
+        box = DIBox()
+        foo = await box.provide(Foo)
+        assert isinstance(foo, Foo)
+        assert isinstance(foo.bar, Bar)
+
+    @pytest.mark.parametrize(
+        ("type_request", "arg_name"),
+        [
+            (Bar, None),
+            (Bar, "arg"),
+            (Bar | Foo, None)
+        ]
+    )
+    async def test_provided_instance_is_reused_on_subsequent_provide(self, type_request: type[Any], arg_name: str | None):
+        box = DIBox()
+        def bar_factory() -> Bar:
+            return Bar(s="test")
+        box.bind(Bar, factory=bar_factory)
+
+        bar_instance1 = await box.provide(type_request, arg_name)
+        bar_instance2 = await box.provide(type_request, arg_name)
+
+        assert bar_instance1 is bar_instance2
+
+    async def test_unresolvable_constructor_arg_raises_on_provide(self):
+        box = DIBox()
+        class MandatoryBar:
+            def __init__(self, s: Any): ...
+        with pytest.raises(TypeError):
+            await box.provide(MandatoryBar)
+
+    @pytest.mark.parametrize(
+        ("requested_type", "name"),
+        [
+            ("I am a string, not a type", None),
+            (Foo | Bar, "arg"),
+            (None, "arg"),
+        ],
+
+    )
+    async def test_non_concrete_type_raises_value_error(self, requested_type: Any, name: str | None):
+        box = DIBox()
+        with pytest.raises(ValueError, match="No binding found"):
+            await box.provide(requested_type, name)
+
+class DIBoxGetTest:
     async def test_get_returns_instance_created_by_provide(self):
         box = DIBox()
         foo_provided = await box.provide(Foo)
@@ -81,6 +108,8 @@ class DIBoxTest:
         with pytest.raises(KeyError):
             box.get(Foo)
 
+
+class DIBoxInjectTest:
     async def test_inject_decorator_supplies_bound_instance_to_annotated_param(self):
         box = DIBox()
         box.bind(Bar, BarDerived(s="injected"))
@@ -230,3 +259,56 @@ class DIBoxLifecycleManagementTest:
         await box.close()
 
         exit_mock.assert_called_once()
+
+
+class DIBoxModulesTest:
+    async def test_type_bound_in_module_is_provided(self):
+        module = BindingBox()
+        module.bind(Bar, instance=Bar(s="from module"))
+        box = DIBox()
+        box.add_bindings(module)
+
+        bar = await box.provide(Bar)
+
+        assert bar.s == "from module"
+
+    async def test_last_added_module_wins_for_same_type(self):
+        m1 = BindingBox()
+        m1.bind(Bar, instance=Bar(s="first"))
+        m2 = BindingBox()
+        m2.bind(Bar, instance=Bar(s="last"))
+        box = DIBox()
+        box.add_bindings(m1)
+        box.add_bindings(m2)
+
+        bar = await box.provide(Bar)
+
+        assert bar.s == "last"
+
+    async def test_container_own_binding_takes_precedence_over_modules(self):
+        m1 = BindingBox()
+        m1.bind(Bar, instance=Bar(s="module1"))
+        m2 = BindingBox()
+        m2.bind(Bar, instance=Bar(s="module2"))
+        box = DIBox()
+        box.add_bindings(m1)
+        box.add_bindings(m2)
+        box.bind(Bar, instance=Bar(s="container"))
+
+        bar = await box.provide(Bar)
+
+        assert bar.s == "container"
+
+    async def test_cross_module_dependencies_are_wired(self):
+        m1 = BindingBox()
+        m1.bind(Bar, instance=Bar(s="from m1"))
+        m2 = BindingBox()
+        m2.bind(Foo, Foo)
+        box = DIBox()
+        box.add_bindings(m1)
+        box.add_bindings(m2)
+
+        foo = await box.provide(Foo)
+
+        assert isinstance(foo, Foo)
+        assert foo.bar.s == "from m1"

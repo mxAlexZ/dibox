@@ -170,13 +170,19 @@ mock_billing.bind(PaymentGateway, MockGateway)
 mock_billing.bind(InvoiceStorage, InMemoryInvoiceStorage)
 
 async with DIBox() as box:
-    box.add_bindings(mock_billing)            # overrides take precedence if searched first
-    box.add_bindings(notification_bindings)   # real notifications still wired
+    box.add_bindings(notification_bindings)   # real notifications — base layer
+    box.add_bindings(mock_billing)            # override layer — registered last, wins
 ```
 
-Resolution order matters: the first match wins. The container's own direct bindings
-(`box.bind(...)`) take precedence over addons, and addons are searched in registration
-order. This makes override placement explicit and predictable.
+Resolution order: **last-registered wins** among addons. A module registered later
+overrides any earlier module that binds the same type. The container's own direct
+bindings (`box.bind(...)`) always take highest precedence regardless of order — they
+are the most explicit signal.
+
+This matches the convention used by .NET DI, Spring, and Dishka, and reads naturally:
+register the base layer first, add specialisations or overrides on top. Guice's
+first-wins approach is the notable outlier — and the need for its explicit
+`Modules.override()` escape hatch is the practical argument against it.
 
 ## What this does not need
 
