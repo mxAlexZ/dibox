@@ -16,6 +16,7 @@ cache:
 stages:
   - test
   - build
+  - release
   - publish
 
 
@@ -46,7 +47,7 @@ unit-tests:
         path: coverage.xml
     expire_in: 2 days
 
-ruff-lint:
+ruff:
   stage: test
   allow_failure: true
   script:
@@ -92,7 +93,7 @@ zuban:
   rules:
     - *merge_request
 
-bump-version:
+prepare-release:
   stage: build
   rules:
     - *main_branch
@@ -123,12 +124,10 @@ bump-version:
       dotenv: variables.env
 
 create-release:
-  stage: publish
+  stage: release
   rules:
     - *main_branch
-  needs:
-    - job: bump-version
-      artifacts: true
+  needs: [prepare-release]
   image: registry.gitlab.com/gitlab-org/cli:latest
   before_script:
   script:
@@ -140,8 +139,9 @@ create-release:
 
 publish-package-test:
   stage: publish
-  needs: [bump-version]
+  needs: [create-release, prepare-release]
   when: manual
+  allow_failure: false
   script:
     - uv publish --index testpypi
   id_tokens:
@@ -149,13 +149,12 @@ publish-package-test:
       aud: testpypi
   rules:
     - *main_branch
-  dependencies:
-    - bump-version
 
 publish-package-pypi:
   stage: publish
-  needs: [bump-version]
+  needs: [create-release, prepare-release]
   when: manual
+  allow_failure: false
   script:
     - uv publish
   id_tokens:
@@ -163,5 +162,3 @@ publish-package-pypi:
       aud: pypi
   rules:
     - *main_branch
-  dependencies:
-    - bump-version
