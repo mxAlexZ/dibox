@@ -99,14 +99,20 @@ prepare-release:
     - *main_branch
   when: manual
   before_script:
-    - apt-get -qq update && apt-get -qq install -y git > /dev/null
-  script:
-    - git fetch --tags origin
+    - apt-get -qq update && apt-get -qq install -y git openssh-client > /dev/null
+    - eval $(ssh-agent -s)
+    - cat "${SSH_PRIVATE_KEY}" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - ssh-keyscan ${CI_SERVER_HOST} >> ~/.ssh/known_hosts
+    - git remote set-url origin "git@${CI_SERVER_HOST}:${CI_PROJECT_PATH}.git"
     - git config user.name "GitLab CI"
     - git config user.email "ci-bot@noreply.gitlab.com"
+    - git fetch --tags origin
+  script:
     - uv version --bump patch
     - NEW_VERSION=$(uv version --short)
-    - echo "RELEASE_VERSION=${NEW_VERSION}" >> variables.env
+    - echo "RELEASE_VERSION=${NEW_VERSION}" | tee variables.env
     - uvx git-cliff --tag "v${NEW_VERSION}" --unreleased --prepend CHANGELOG.md
     - git add pyproject.toml uv.lock CHANGELOG.md
     - 'git commit -m "CI Bot: Bump version to ${NEW_VERSION} [skip ci]"'
