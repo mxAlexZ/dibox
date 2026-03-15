@@ -92,20 +92,55 @@ zuban:
   rules:
     - *merge_request
 
-build-package:
+bump-version:
   stage: build
-  script:
-    - uv build
   rules:
     - *main_branch
+  when: manual
+  before_script:
+    - apt-get -qq update && apt-get -qq install -y git > /dev/null
+  script:
+    - git fetch --tags origin
+    - git config user.name "GitLab CI"
+    - git config user.email "ci-bot@noreply.gitlab.com"
+    - uv version --bump patch
+    - NEW_VERSION=$(uv version --short)
+    - echo "RELEASE_VERSION=${NEW_VERSION}" >> variables.env
+    - uvx git-cliff --tag "v${NEW_VERSION}" --unreleased --prepend CHANGELOG.md
+    - git add pyproject.toml uv.lock CHANGELOG.md
+    - 'git commit -m "CI Bot: Bump version to ${NEW_VERSION} [skip ci]"'
+    - git tag "v${NEW_VERSION}"
+    - git push origin HEAD:$CI_COMMIT_BRANCH
+    - git push origin "v${NEW_VERSION}"
+    - uvx git-cliff --latest -o release_notes.md
+    - echo "--- Release notes ---" && cat release_notes.md
+    - uv build
   artifacts:
     paths:
+      - release_notes.md
       - dist/
-    expire_in: 2 days
+    reports:
+      dotenv: variables.env
+
+create-release:
+  stage: publish
+  rules:
+    - *main_branch
+  needs:
+    - job: bump-version
+      artifacts: true
+  image: registry.gitlab.com/gitlab-org/cli:latest
+  before_script:
+  script:
+    - echo "Creating release v${RELEASE_VERSION}"
+  release:
+    tag_name: "v${RELEASE_VERSION}"
+    name: "Release v${RELEASE_VERSION}"
+    description: release_notes.md
 
 publish-package-test:
   stage: publish
-  needs: [build-package]
+  needs: [bump-version]
   when: manual
   script:
     - uv publish --index testpypi
@@ -115,11 +150,11 @@ publish-package-test:
   rules:
     - *main_branch
   dependencies:
-    - build-package
+    - bump-version
 
 publish-package-pypi:
   stage: publish
-  needs: [build-package]
+  needs: [bump-version]
   when: manual
   script:
     - uv publish
@@ -129,4 +164,4 @@ publish-package-pypi:
   rules:
     - *main_branch
   dependencies:
-    - build-package
+    - bump-version

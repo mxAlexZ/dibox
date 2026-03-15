@@ -1,0 +1,43 @@
+# git-cliff ~ configuration file
+# https://git-cliff.org/docs/configuration
+
+[changelog]
+body = """
+{% if version %}\
+    ## {{ version }} ({{ timestamp | date(format="%Y-%m-%d") }})\
+{% else %}\
+    ## Unreleased\
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+    ### {{ group | upper_first }}
+    {% for commit in commits %}\
+        - {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message | upper_first }}
+    {% endfor %}\
+{% endfor %}\n
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+require_conventional = false
+split_commits = false
+commit_preprocessors = [
+    # Delete ticket numbers from commit messages
+    { pattern = '\s+#([0-9]+)', replace = ""},
+]
+protect_breaking_commits = false
+commit_parsers = [
+    { message = "(?i)^fix",      group = "<!-- 1 -->🐛 Bug Fixes" },
+    { message = "(?i)^refactor", group = "<!-- 2 -->🚜 Refactor" },
+    { message = "(?i)^doc",      group = "<!-- 3 -->📚 Documentation" },
+    { message = "(?i)^perf",     group = "<!-- 4 -->⚡ Performance" },
+    { message = "(?i)^misc",     group = "<!-- 5 -->💼 Miscellaneous" },
+    { message = "(?i)^(build|ci|tools|chore):", group = "<!-- 7 -->🛠️ Under the hood" },
+    { message = "(?i)^revert",   group = "<!-- 9 -->◀️ Revert" },
+    { message = "(?i)^ci bot:",  skip = true },
+    { message = ".*",            group = "<!-- 0 -->🚀 Features & Enhancements" },
+]
+filter_commits = false
+link_parsers = []
+tag_pattern = "v[0-9].*"
