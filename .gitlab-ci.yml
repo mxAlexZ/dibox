@@ -19,7 +19,6 @@ stages:
   - release
   - publish
 
-
 after_script: &after_script
   - uv cache prune --ci
 

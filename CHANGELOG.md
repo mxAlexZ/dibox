@@ -1,11 +1,13 @@
 ## v0.1.7 (2026-03-15)
 ### <!-- 0 -->🚀 Features & Enhancements
 - Support context managers and yield (generator) factories
-- Eps updates: injection, scopes, binding boxes
 - Modules (BindingBox) support
 
 ### <!-- 2 -->🚜 Refactor
 - Add InstanceBox tests, improve test structure, rename FactoryBox to BindingBox
+
+### <!-- 3 -->📚 Documentation
+- Eps updates: injection, scopes, binding boxes
 
 ### <!-- 7 -->🛠️ Under the hood
 - Tweak uv settings for GitLab CI
