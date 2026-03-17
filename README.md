@@ -1,6 +1,8 @@
 
 # DIBox
 
+[![release](https://gitlab.com/AlexZee/dibox/-/badges/release.svg)](https://gitlab.com/AlexZee/dibox/-/releases) ![Python Versions](https://img.shields.io/pypi/pyversions/dibox) [![coverage](https://gitlab.com/AlexZee/dibox/badges/main/coverage.svg)](https://gitlab.com/AlexZee/dibox/-/commits/main) [![PyPI - License](https://img.shields.io/pypi/l/dibox)](https://gitlab.com/AlexZee/dibox/-/blob/main/LICENSE)
+
 ---
 
 **⚠️ Project Status: Early Development**
