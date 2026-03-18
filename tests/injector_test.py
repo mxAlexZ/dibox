@@ -2,7 +2,7 @@ import inspect
 
 import pytest
 
-from dibox import ArgumentStrategy, DIBox, Injected, Injector, NotInjected
+from dibox import DIBox, Injected, Injector
 
 
 class Foo:
@@ -40,25 +40,11 @@ class TestInjector:
         injector = Injector(dibox)
         wrapped_func = _make_decorated(injector, decorator_style)
 
-        res_a, res_b = wrapped_func(10)
+        res_a, res_b = wrapped_func(a=10)
 
         assert res_a == 10
         assert res_b.s == "test"
         assert set(inspect.signature(wrapped_func).parameters.keys()) == {"a"}
-
-
-    async def test_optout_strategy(self, dibox: DIBox):
-        injector = Injector(dibox, ArgumentStrategy.OPT_OUT)
-
-        @injector.inject
-        def func(a: NotInjected[int], b: Foo):
-            return a, b
-
-        res_a, res_b = func(10)
-
-        assert res_a == 10
-        assert res_b.s == "test"
-        assert set(inspect.signature(func).parameters.keys()) == {"a"}
 
 
     async def test_override_injected_arg(self, dibox: DIBox):

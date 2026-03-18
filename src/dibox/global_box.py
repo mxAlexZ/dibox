@@ -15,11 +15,10 @@ def inject(func: Callable[..., _R]) -> Callable[..., _R]:
     This decorator should only be used at application entry points; for example,
     at REST endpoint definitions like AWS lambda handlers or FastAPI routes.
 
-    By default (in `ArgumentStrategy.OPT_IN`), it injects dependencies only for
-    parameters annotated with `Injected`. The decorated function's signature is
-    modified to remove the injected parameters, so they don't need to be passed
-    when calling it. However, they can still be passed as keyword arguments to
-    override the injection.
+    It injects dependencies only for parameters annotated with `Injected`.
+    The decorated function's signature is modified to remove the injected
+    parameters, so they don't need to be passed when calling it. However, they
+    can still be passed as keyword arguments to override the injection.
 
     Usage:
 

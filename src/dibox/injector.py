@@ -15,16 +15,6 @@ class InjectDecoratorProtocol(Protocol):
     def __call__(self, func: Callable[..., _R]) -> Callable[..., _R]: ...
 
 
-class ArgumentStrategy(StrEnum):
-    """
-    Specifies the mode of dependency injection for the inject decorator:
-    whether all parameters with type hints should be considered for injection,
-    or only those explicitly marked.
-    """
-    OPT_OUT = "opt_out"
-    OPT_IN = "opt_in"
-
-
 class SignatureModification(StrEnum):
     """
     Specifies how the inject decorator modifies the decorated function's signature:
@@ -36,11 +26,10 @@ class SignatureModification(StrEnum):
 
 
 class Injector:
-    def __init__(self, container: ContainerProtocol, argument_strategy: ArgumentStrategy = ArgumentStrategy.OPT_IN):
-        # also possible configuration is implicit/explicit wiring, caching, custom inject marker/function,
-        # signature modification, etc.
-        # note: when we add 'resolver' option, we won't know the container at the this time.
-        self._decorator = _make_decorator(container, argument_strategy)
+    __slots__ = ("_decorator",)
+
+    def __init__(self, container: ContainerProtocol) -> None:
+        self._decorator = _make_decorator(container)
 
     def __call__(self, func: Callable[..., _R]) -> Callable[..., _R]:
         return self.inject(func)
@@ -49,7 +38,10 @@ class Injector:
         return self._decorator(func)
 
 
-def _params_to_inject(injected_params: dict[str, type], kwds: dict[str, Any]) -> Iterable[tuple[str, type]]:
+def _params_to_inject(
+    injected_params: dict[str, type],
+    kwds: dict[str, Any],
+) -> Iterable[tuple[str, type]]:
     for name, t in injected_params.items():
         if name not in kwds:
             yield name, t
@@ -74,12 +66,9 @@ def _make_wrapper(
         return sync_wrapper
 
 
-def _make_decorator(
-    container: ContainerProtocol,
-    argument_strategy: ArgumentStrategy,
-) -> InjectDecoratorProtocol:
+def _make_decorator(container: ContainerProtocol) -> InjectDecoratorProtocol:
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        injected_params = get_injected_params(func, argument_strategy == ArgumentStrategy.OPT_OUT)
+        injected_params = get_injected_params(func)
         wrapper = _make_wrapper(func, container, injected_params)
         update_wrapper(wrapper, func)
         remove_params_from_signature(wrapper, injected_params)

@@ -32,7 +32,7 @@ commit_parsers = [
     { message = "(?i)^refactor", group = "<!-- 2 -->🚜 Refactor" },
     { message = "(?i)^doc",      group = "<!-- 3 -->📚 Documentation" },
     { message = "(?i)^perf",     group = "<!-- 4 -->⚡ Performance" },
-    { message = "(?i)^misc",     group = "<!-- 5 -->💼 Miscellaneous" },
+    { message = "(?i)^misc",     group = "<!-- 5 -->✨ Miscellaneous" },
     { message = "(?i)^(build|ci|tools|chore):", group = "<!-- 7 -->🛠️ Under the hood" },
     { message = "(?i)^revert",   group = "<!-- 9 -->◀️ Revert" },
     { message = "(?i)^ci bot:",  skip = true },

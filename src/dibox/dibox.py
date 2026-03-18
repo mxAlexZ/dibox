@@ -4,7 +4,7 @@ from typing import Any, Awaitable, Callable, Self, TypeVar, get_origin, overload
 
 from .binding_box import BindingBox, BindingRecord
 from .dimap import ArgNameQuery, DIMapKey, TypeQuery
-from .injector import ArgumentStrategy, Injector
+from .injector import Injector
 from .instance_box import InstanceBox
 
 _T = TypeVar("_T")
@@ -40,9 +40,9 @@ class DIBox(BindingBox):
         db_config = await box.provide(DbConfig)
     """
 
-    def __init__(self, inject_mode: ArgumentStrategy = ArgumentStrategy.OPT_IN) -> None:
+    def __init__(self) -> None:
         self.instances = InstanceBox()
-        self.injector = Injector(self, inject_mode)
+        self.injector = Injector(self)
         self.modules: list[BindingBox] = []
         super().__init__()
 
@@ -77,9 +77,7 @@ class DIBox(BindingBox):
     def inject(self, func: Callable[..., _R]) -> Callable[..., _R]:
         """Decorates a function so missing injectable arguments come from this container.
 
-        In `OPT_IN` mode, only parameters marked with `Injected[...]` are
-        injected. In `OPT_OUT` mode, all typed parameters are considered
-        injectable unless explicitly marked otherwise.
+        Only parameters marked with `Injected[...]` are injected.
 
         The wrapped function keeps its runtime behavior, but injected
         parameters are removed from the visible signature. This is useful for
