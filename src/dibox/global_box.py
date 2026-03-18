@@ -1,21 +1,14 @@
-from typing import Any, Callable, TypeVar, overload
+from typing import Callable, TypeVar
 
 from .dibox import DIBox
-from .injector import ArgumentStrategy, InjectDecoratorProtocol, make_decorator
+from .injector import Injector
 
 _R = TypeVar("_R")
 
 global_dibox = DIBox()
+_global_injector = Injector(global_dibox)
 
-
-@overload
-def inject(container: Callable[..., _R]) -> Callable[..., _R]: ...
-@overload
-def inject(container: DIBox = ..., argument_strategy: ArgumentStrategy = ...) -> InjectDecoratorProtocol: ...
-def inject(
-    container: DIBox | Callable[..., Any] = global_dibox,
-    argument_strategy: ArgumentStrategy = ArgumentStrategy.OPT_IN,
-) -> InjectDecoratorProtocol | Callable[..., Any]:
+def inject(func: Callable[..., _R]) -> Callable[..., _R]:
     """
     Decorator for injecting dependencies into a function from a DI container.
 
@@ -28,17 +21,13 @@ def inject(
     when calling it. However, they can still be passed as keyword arguments to
     override the injection.
 
-    Supports both bracket and no-bracket usage:
+    Usage:
 
     ```python
     @inject
     def consumer(foo: Injected[Foo]): ...
-
-    @inject(my_container)
-    def consumer(foo: Injected[Foo]): ...
     ```
+
+    For non-global containers, use `box.inject` or `Injector(box).inject`.
     """
-    if not isinstance(container, DIBox):  # Called as @inject without parentheses
-        wrapped_func = container # that isn't a container, but the function to wrap ;)
-        return make_decorator(global_dibox, argument_strategy)(wrapped_func)
-    return make_decorator(container, argument_strategy)
+    return _global_injector.inject(func)

@@ -1,7 +1,7 @@
 import inspect
 from enum import StrEnum
 from functools import update_wrapper
-from typing import Any, Awaitable, Callable, Iterable, Protocol, TypeVar, cast, overload
+from typing import Any, Awaitable, Callable, Iterable, Protocol, TypeVar, cast
 
 from .annotations import get_injected_params, remove_params_from_signature
 from .container_protocol import ContainerProtocol
@@ -40,25 +40,13 @@ class Injector:
         # also possible configuration is implicit/explicit wiring, caching, custom inject marker/function,
         # signature modification, etc.
         # note: when we add 'resolver' option, we won't know the container at the this time.
-        self._decorator = make_decorator(container, argument_strategy)
+        self._decorator = _make_decorator(container, argument_strategy)
 
-    @overload
-    def __call__(self, func: Callable[..., _R]) -> Callable[..., _R]: ...
-    @overload
-    def __call__(self) -> InjectDecoratorProtocol: ...
-    def __call__(self, func: Callable[..., _R] | None = None) -> Callable[..., _R] | InjectDecoratorProtocol:
-        if func is not None:
-            return self._decorator(func)
-        return self._decorator
+    def __call__(self, func: Callable[..., _R]) -> Callable[..., _R]:
+        return self.inject(func)
 
-    @overload
-    def inject(self, func: Callable[..., _R]) -> Callable[..., _R]: ...
-    @overload
-    def inject(self) -> InjectDecoratorProtocol: ...
-    def inject(self, func: Callable[..., _R] | None = None) -> Callable[..., _R] | InjectDecoratorProtocol:
-        if func is not None:
-            return self._decorator(func)
-        return self._decorator
+    def inject(self, func: Callable[..., _R]) -> Callable[..., _R]:
+        return self._decorator(func)
 
 
 def _params_to_inject(injected_params: dict[str, type], kwds: dict[str, Any]) -> Iterable[tuple[str, type]]:
@@ -86,7 +74,7 @@ def _make_wrapper(
         return sync_wrapper
 
 
-def make_decorator(
+def _make_decorator(
     container: ContainerProtocol,
     argument_strategy: ArgumentStrategy,
 ) -> InjectDecoratorProtocol:

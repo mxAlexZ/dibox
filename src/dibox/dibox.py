@@ -86,7 +86,7 @@ class DIBox(BindingBox):
         framework entry points that inspect signatures (for example, web or CLI
         handlers).
         """
-        return self.injector()(func)
+        return self.injector.inject(func)
 
     @overload
     def call(self, func: Callable[..., Awaitable[_R]], *args: Any, **kwargs: Any) -> Awaitable[_R]: ...

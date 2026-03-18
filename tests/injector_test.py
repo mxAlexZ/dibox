@@ -18,37 +18,24 @@ async def dibox():
         yield box
 
 
-decorator_styles = ["@inject", "@inject()", "@injector.inject", "@injector.inject()"]
-
 def _make_decorated(injector: Injector, decorator_style: str = "@injector.inject"):
     @injector
     def func_call(a: int, b: Injected[Foo]):
-        return a, b
-
-    @injector()
-    def func_call_parenthesis(a: int, b: Injected[Foo]):
         return a, b
 
     @injector.inject
     def func_inject(a: int, b: Injected[Foo]):
         return a, b
 
-    @injector.inject()
-    def func_inject_parenthesis(a: int, b: Injected[Foo]):
-        return a, b
-
     func_by_name = {
-        "@inject": func_call,
-        "@inject()": func_call_parenthesis,
+        "@injector": func_call,
         "@injector.inject": func_inject,
-        "@injector.inject()": func_inject_parenthesis,
     }
     return func_by_name[decorator_style]
 
 
 class TestInjector:
-
-    @pytest.mark.parametrize("decorator_style", decorator_styles)
+    @pytest.mark.parametrize("decorator_style", ["@injector", "@injector.inject"])
     async def test_decorator_styles(self, decorator_style: str, dibox: DIBox):
         injector = Injector(dibox)
         wrapped_func = _make_decorated(injector, decorator_style)
