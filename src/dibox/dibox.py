@@ -1,6 +1,7 @@
 import inspect
 import logging
-from typing import Any, Awaitable, Callable, Self, TypeVar, get_origin, overload
+from contextvars import ContextVar, Token
+from typing import Any, Awaitable, Callable, ClassVar, TypeVar, get_origin, overload
 
 from .binding_box import BindingBox, BindingRecord
 from .dimap import ArgNameQuery, DIMapKey, TypeQuery
@@ -40,11 +41,26 @@ class DIBox(BindingBox):
         db_config = await box.provide(DbConfig)
     """
 
+    _context_box: ClassVar[ContextVar["DIBox"]] = ContextVar("dibox")
+
     def __init__(self) -> None:
         self.instances = InstanceBox()
         self.injector = Injector(self)
         self.modules: list[BindingBox] = []
+        self._context_token: Token["DIBox"] | None = None
         super().__init__()
+
+    @classmethod
+    def from_context(cls) -> "DIBox":
+        """Returns the container currently active in this context.
+
+        Raises:
+            RuntimeError: If no container is active. Use `async with box:` to activate one.
+        """
+        try:
+            return cls._context_box.get()
+        except LookupError:
+            raise RuntimeError("No active container — use 'async with box:' first")
 
     def add_bindings(self, binding_box: BindingBox) -> None:
         """Registers a reusable binding module (`BindingBox`) on this container.
@@ -210,7 +226,8 @@ class DIBox(BindingBox):
                 res[first_arg.name] = type_to_create
         return res
 
-    async def __aenter__(self) -> Self:
+    async def __aenter__(self) -> "DIBox":
+        self._context_token = DIBox._context_box.set(self)
         return self
 
     async def __aexit__(self, *exc_details: Any) -> None:
@@ -222,4 +239,7 @@ class DIBox(BindingBox):
         behalf of the whole container, ensuring the exception always propagates to
         the caller and all other cleanup handlers still receive it.
         """
+        if self._context_token is not None:
+            DIBox._context_box.reset(self._context_token)
+            self._context_token = None
         await self.instances.close(exc_details)

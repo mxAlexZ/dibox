@@ -14,7 +14,7 @@ def route_b(...): ...
 
 This causes repetitive boilerplate and makes architectural changes expensive (switching container strategy means editing many entry points).
 
-For import-time integration with frameworks (FastAPI, Typer), decorators also need to cooperate with strict signature inspection. That is why marker annotations (`Injected[...]` / `NotInjected[...]`) exist: they communicate DI intent explicitly in a context where the runtime container state is not fully available yet.
+For import-time integration with frameworks (FastAPI, Typer), decorators also need to cooperate with strict signature inspection. That is why marker annotations (`Injected[...]`) exist: they communicate DI intent explicitly at decoration time, before the container is active.
 
 The direction here is progressive disclosure:
 - simple apps should work with minimal ceremony,
@@ -26,24 +26,21 @@ The encouraged default forms are:
 - `@inject`
 - `@container.inject`
 
-`@inject` is currently backed by `global_dibox`, and the accepted backlog item is to move it to contextvar-based container resolution. Once that lands, plain `@inject` should cover more real-world cases without manual wiring.
+`@inject` is backed by `DIBox.from_context` — a contextvar that holds the container entered via `async with box:`. Injection happens at call time from whatever container is active in the current async task or thread. This makes `@inject` safe for parallel execution (no process-wide global) and means it works naturally with framework lifespans: decorate at import time, activate the container at startup.
 
-`@container.inject` keeps the same low ceremony while making container ownership explicit.
+`@container.inject` keeps the same low ceremony while making container ownership explicit and fixed at decoration time.
 
 ### Injector as domain-level configuration
 
 `Injector` is for cases where you want one reusable policy per architectural domain (for example app-level routes vs. session-level routes), then apply it consistently at entry points.
 
 ```python
-global_container = DIBox()
+app_box = DIBox()
 
-app_api = Injector(
-    container=global_container
-)
+app_api = Injector(app_box)
 
-session_api = Injector(
-    resolver=lambda request: request.state.session_container
-)
+# Late-bound: resolves from context at call time, same as @inject
+session_api = Injector(container_resolver=DIBox.from_context)
 
 @app_api.inject
 async def get_system_config(config: Injected[AppConfig]):
@@ -56,22 +53,45 @@ async def update_user_cart(request: Request, cart: Injected[ShoppingCart]):
 
 `@injector` (without `.inject`) is supported and should remain supported because it costs little, but `@injector.inject` is the canonical documented form, consistent with `@container.inject`.
 
-`ArgumentStrategy` exists in the current implementation (`OPT_IN` default, `OPT_OUT` available), but it is not the core value proposition of `Injector`. In practice, `resolver` and signature behavior are the bigger differentiators for framework and scoped usage.
+`ArgumentStrategy` / `OPT_OUT` mode was removed from the implementation. The `OPT_IN` default (inject only `Injected[...]`-annotated params) is sufficient for all current use cases and keeps intent explicit.
 
-### Planned: context-aware injection via resolver
+### `container_resolver` — context-aware and scoped injection
 
-`resolver` is one of the main missing features and the key enabler for scoped/container-per-context patterns.
+`Injector` accepts either a fixed `container` or a `container_resolver: Callable[[], ContainerProtocol]` (keyword-only). Exactly one must be provided.
 
-Without resolver, `Injector` only works with a container known at import time. With resolver, container selection moves to call time, which allows patterns like per-session or per-request containers while keeping route handlers clean.
-
-Design intent:
 - `container=` for static, import-time known container.
-- `resolver=` for context-aware, runtime-selected container.
-- exactly one of them should be provided.
+- `container_resolver=` for runtime-selected container — per-request, per-session, or context-based.
 
-This connects directly to scope support: resolver is the bridge between scoped container lifecycle and decorator-based entry points.
+`DIBox.from_context` is the built-in resolver that reads the contextvar, and it is also what plain `@inject` uses internally. Custom resolvers can read from request state, thread-locals, or any other runtime source.
 
-### Planned: non-destructive signature mode
+This is the bridge between scoped container lifecycle and decorator-based entry points — resolver-based `Injector` instances remain the right tool once per-request scoping lands.
+
+```python
+# These two are equivalent:
+@inject
+async def handler(svc: Injected[MyService]): ...
+
+_injector = Injector(container_resolver=DIBox.from_context)
+@_injector.inject
+async def handler(svc: Injected[MyService]): ...
+```
+
+### Open: resolver with call-time arguments
+
+Currently `container_resolver` is `Callable[[], ContainerProtocol]` — it takes no arguments. In theory it could receive arguments from the wrapped function's call (e.g. the `request` object in a web handler), allowing patterns like:
+
+```python
+# hypothetical — not implemented
+session_injector = Injector(container_resolver=lambda req: req.state.session_container)
+
+@session_injector.inject
+async def update_cart(request: Request, cart: Injected[ShoppingCart]):
+    ...
+```
+
+This would make resolvers more powerful for per-request scoping without relying on a contextvar at all. The open questions are what the resolver signature should look like (all positional args? only kwargs? a typed protocol?) and whether the added complexity is justified given that contextvar-based scoping covers most cases already. Leaving open; revisit when per-request scoping requirements are clearer.
+
+### Open: non-destructive signature mode
 
 Current implementation is always destructive: injected params are removed from `__signature__`.
 
@@ -81,9 +101,9 @@ Demand perspective:
 - likely lower demand for FastAPI/Typer entry points (destructive mode is usually preferred there),
 - potentially meaningful for internal tooling, debugging, reflection-heavy code, and teams that treat explicit callable signatures as part of developer ergonomics.
 
-So this looks less like a universal must-have and more like a targeted opt-in capability. It is still worth planning, but probably after resolver.
+So this looks less like a universal must-have and more like a targeted opt-in capability. Still worth planning, but lower priority than scoped containers.
 
-Note: `SignatureModification` already exists in source as a placeholder and is not wired yet.
+Note: `SignatureModification` exists in source as a placeholder and is not wired yet.
 
 
 ## Imperative / Runtime-Aware API (container.call and container.partial) and greedy resolution

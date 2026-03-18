@@ -312,3 +312,36 @@ class DIBoxModulesTest:
 
         assert isinstance(foo, Foo)
         assert foo.bar.s == "from m1"
+
+
+class DIBoxContextTest:
+    async def test_from_context_returns_active_box_inside_async_with(self):
+        box = DIBox()
+        async with box:
+            assert DIBox.from_context() is box
+
+    def test_from_context_raises_when_no_box_is_active(self):
+        with pytest.raises(RuntimeError, match="No active container"):
+            DIBox.from_context()
+
+    async def test_from_context_raises_after_box_exits(self):
+        box = DIBox()
+        async with box:
+            pass
+        with pytest.raises(RuntimeError, match="No active container"):
+            DIBox.from_context()
+
+    async def test_nested_box_becomes_active_context_on_enter(self):
+        outer = DIBox()
+        inner = DIBox()
+        async with outer:
+            async with inner:
+                assert DIBox.from_context() is inner
+
+    async def test_outer_box_is_restored_after_inner_exits(self):
+        outer = DIBox()
+        inner = DIBox()
+        async with outer:
+            async with inner:
+                pass
+            assert DIBox.from_context() is outer
