@@ -1,3 +1,18 @@
+## v0.1.8 (2026-03-19)
+### <!-- 0 -->🚀 Features & Enhancements
+- Context-aware inject decorator
+
+### <!-- 3 -->📚 Documentation
+- Add badges to the readme
+
+### <!-- 5 -->✨ Miscellaneous
+- Remove @inject() support
+- Remove opt-out strategy support
+
+### <!-- 7 -->🛠️ Under the hood
+- Update pypi projecti metadata
+- Changelog and whitespaces
+
 ## v0.1.7 (2026-03-15)
 ### <!-- 0 -->🚀 Features & Enhancements
 - Support context managers and yield (generator) factories
