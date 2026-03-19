@@ -6,6 +6,12 @@ variables:
 
 image: ghcr.io/astral-sh/uv:python$PYTHON_VERSION-$BASE_LAYER
 
+workflow:
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /^CI Bot:/
+      when: never
+    - when: always
+
 cache:
   key:
     files:
@@ -114,10 +120,10 @@ prepare-release:
     - echo "RELEASE_VERSION=${NEW_VERSION}" | tee variables.env
     - uvx git-cliff --tag "v${NEW_VERSION}" --unreleased --prepend CHANGELOG.md
     - git add pyproject.toml uv.lock CHANGELOG.md
-    - 'git commit -m "CI Bot: Bump version to ${NEW_VERSION} [skip ci]"'
+    - 'git commit -m "CI Bot: Bump version to ${NEW_VERSION}"'
     - git tag "v${NEW_VERSION}"
-    - git push origin HEAD:$CI_COMMIT_BRANCH
-    - git push origin "v${NEW_VERSION}"
+    - git push -o ci.skip origin HEAD:$CI_COMMIT_BRANCH
+    - git push -o ci.skip origin "v${NEW_VERSION}"
     - uvx git-cliff --latest -o release_notes.md
     - echo "--- Release notes ---" && cat release_notes.md
     - uv build
@@ -146,7 +152,6 @@ publish-package-test:
   stage: publish
   needs: [create-release, prepare-release]
   when: manual
-  allow_failure: false
   script:
     - uv publish --index testpypi
   id_tokens:
