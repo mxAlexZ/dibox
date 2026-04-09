@@ -65,13 +65,13 @@ DIBox resolves, instantiates, and injects dependencies by following naturally de
 - **Context-aware `@inject`:** Decorate entry points at import time, activate a container with `async with box:`, and `@inject` resolves dependencies from that context at call time. No container reference at the call site, no per-function wiring.
 - **No Global State Required:** Works equally well with local container instances — no hidden singletons, easy to isolate in unit tests.
 - **Two resolution styles:** Declarative decorators (`@inject`, `@box.inject`) provide signature-aware, import-time integration for frameworks; imperative `box.provide(...)` gives direct runtime control.
-- **Typed API:** The public API is strictly type-annotated, so it works well type checkers and IDE autocompletion.
+- **Typed API:** The public API is strictly type-annotated, so it works well with type checkers and IDE autocompletion.
 
 ## QuickStart
 DIBox requires almost no setup. Define your classes as usual—whether you use standard Python classes with `__init__`, dataclasses, or attrs models.
 
 ### 1. Define your application as usual
-DIBox detects and manages lifecycle hooks automatically. The `Service` class below uses `start()`/`close()` — one of several supported patterns, covered in full in [Resource Lifecycle](#resource-lifecycle).
+Just use type hints to declare dependencies, no DI boilerplate needed.
 
 ```python
 import asyncio
@@ -100,65 +100,53 @@ class Service:
         print("Service is running...")
 
 ```
+DIBox detects and manages lifecycle hooks automatically. The `Service` class below uses `start()`/`close()` — one of several supported patterns, covered in full in [Resource Lifecycle](#resource-lifecycle).
 
 ### 2. Wire and Run
-We only bind `Credentials` manually because it is raw data. DIBox automatically figures out how to create `Database` and inject it into `Service`.
 
-The only wiring you need to do is tell DIBox how to create the things it can’t infer on its own (like `Credentials`)
-
-```python
-def setup_bindings(box: DIBox):
-    box.bind(Credentials, Credentials(username="admin"))
-```
-
-To get a service instance, you can call `provide()` with the target type. DIBox will inspect the constructor, see that it needs a `Database`, then see that `Database` needs `Credentials`, and automatically build the whole graph for you.
+Only bind what DIBox can't infer — here, `Credentials` because it's a raw value with no type-hinted constructor to follow.
 
 ```python
+from dibox import DIBox
+
 box = DIBox()
+box.bind(Credentials, Credentials(username="admin"))  # raw value: bind it explicitly
 
-async def run():
-    # DIBox creates Credentials -> Database -> Service + awaits start()
-    service = await box.provide(Service)
-    service.run()
+async def main():
+    async with box:                           # activate container; start() called on managed resources
+        service = await box.provide(Service)  # resolve the graph: Credentials → Database → Service
+        service.run()
+    # close() called automatically on exit
+
+asyncio.run(main())
 ```
 
-The idiomatic alternative is `@inject`. Frameworks like FastAPI and Typer collect entry points at import time — before your application starts — so decorators must be applied before any container exists. `@inject` is designed for this: the decorator is applied at module load time, and dependencies are resolved only when the function is actually called, from whichever container is active in the current context.
-
-"Active in the current context" means the container entered with `async with box:` in the current async task or thread. It is not a process-wide global — concurrent requests each see their own container — so `@inject` is safe to use in parallel execution.
-
-Parameters annotated with `Injected[...]` are resolved automatically and removed from the visible signature, which is important when frameworks like FastAPI or Typer inspect signatures at import time.
+For framework entry points — FastAPI routes, CLI commands — `@inject` is the idiomatic choice. Decoration happens at module load time; resolution happens at call time from whichever container is active:
 
 ```python
 from dibox import inject, Injected
 
-@inject  # applied at module level — no container reference needed
-async def run(service: Injected[Service]):
+@inject
+async def main(service: Injected[Service]):  # Injected[T] marks the parameter for injection
     service.run()
+
+async def run():
+    async with box:   # makes box the active container for this async context
+        await main()  # service is resolved and injected automatically
+
+asyncio.run(run())
 ```
-
-Finally, activate the container with `async with` and call your entry point:
-
-```python
-async with box:
-    setup_bindings(box)
-    await run()  # service is resolved from box
-# When the `async with` block exits, DIBox automatically calls `close()`
-# on the `Service` instance and any other managed resources, ensuring
-# safe and predictable cleanup.
-```
-
-That's the core loop: bind the bits DIBox can't infer, activate the container with `async with box:`, and `@inject` handles the rest.
 
 ## Advanced usage
 
 ### Using Decorators for Injection
-Decorators allow injecting dependencies into entry points — API routes, CLI commands, Lambda handlers — without cluttering function signatures. A key feature is **signature modification**: injected parameters are removed from the visible signature, so frameworks like FastAPI or Typer don't see them when generating API docs or CLI help text.
+Decorators allow injecting dependencies into entry points — API routes, CLI commands, Lambda handlers — without cluttering call sites. A key feature: `@inject` rewrites the function's runtime signature, removing `Injected[T]` parameters. Frameworks that inspect signatures at import/routing time only see your "real" parameters (path/query args, request objects, etc.).
 
 DIBox offers three options in increasing order of explicitness.
 
 #### 1. `@inject` — context-based (idiomatic)
 
-The recommended default. Apply `@inject` at module level — no container reference needed at decoration time. At call time, it resolves dependencies from whichever `DIBox` is active via `async with box:`.
+The recommended default. Apply `@inject` at module level — no container reference needed at decoration time. At call time, it resolves dependencies from whichever `DIBox` is active via `async with box:`. Because the active container is stored in a `ContextVar`, it is isolated per async task and per OS thread — there is no process-wide global, and concurrent requests each see their own container.
 
 ```python
 from dibox import inject, Injected
@@ -195,7 +183,7 @@ FastAPI sees `get_report(report_id: str)` — the injected `db` parameter is inv
 
 #### 2. `@box.inject` — explicit container
 
-When you want injection tied to a specific container instance rather than the active context, use `@box.inject`. The container is captured at decoration time.
+When you want injection tied to a specific container instance rather than the active context, use `@box.inject`. Unlike `@inject`, it ignores the ContextVar entirely — the container is captured at decoration time and always used, regardless of which container is active at call time.
 
 ```python
 local_box = DIBox()
@@ -207,34 +195,13 @@ async def specific_handler(service: Injected[Service]):
 
 Useful when you have multiple concurrent containers, in integration tests where you want injection to be explicit, or when you simply prefer the container reference visible at the call site.
 
-#### 3. `Injector` — reusable policy
+For advanced use cases (custom container resolution strategies, enforcing architectural layers), the underlying `Injector` class is available directly. It accepts either a container instance or a `container_resolver` callable and exposes the same `.inject` decorator.
 
-`Injector` is for cases where you want one injection policy object applied consistently across many entry points. Create it once, use `@injector.inject` everywhere.
+#### Imperative entrypoints (planned)
 
-```python
-from dibox import DIBox, Injected, Injector
-import azure.functions as func
+The entrypoints ADR also proposes `DIBox.call()` and `DIBox.partial()` for direct execution use cases (injecting by inspecting the function signature without `Injected[...]` markers). These APIs are not implemented yet (currently, `DIBox.call()` raises `NotImplementedError`).
 
-app_box = DIBox()
-api_injector = Injector(app_box)
-
-class ProcessingService:
-    def process(self, body: str) -> str:
-        return f"Processed: {body}"
-
-# The framework sees: main(req: func.HttpRequest)
-@api_injector.inject
-async def main(req: func.HttpRequest, service: Injected[ProcessingService]) -> func.HttpResponse:
-    result = service.process(req.get_body().decode())
-    return func.HttpResponse(f"Success! {result}", status_code=200)
-```
-
-`Injector` also accepts `container_resolver` for late-bound or scoped containers:
-
-```python
-# Equivalent to @inject — resolves from the active context
-session_injector = Injector(container_resolver=DIBox.from_context)
-```
+Today, the supported imperative API is `await box.provide(T)` (and `box.get(T)` for already-created instances).
 
 ### Resource Lifecycle
 
