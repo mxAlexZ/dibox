@@ -48,7 +48,7 @@ testpaths = ["tests"]
 python_classes = ["Test*", "*Test"]
 
 [tool.ruff]
-extend-exclude = ["./notebooks", "./docs"]
+extend-exclude = ["./docs"]
 lint.select = ["E", "F", "I", "PT"]
 line-length = 125
 
@@ -59,7 +59,7 @@ strict = true
 
 [tool.pyright]
 typeCheckingMode = "strict"
-exclude = ["./notebooks", "./docs", "**/node_modules", "**/__pycache__", "**/.*", ".venv"]
+exclude = ["./docs", "**/node_modules", "**/__pycache__", "**/.*", ".venv"]
 
 
 [[tool.uv.index]]
