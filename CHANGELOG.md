@@ -1,3 +1,16 @@
+## v0.1.9 (2026-04-16)
+### <!-- 0 -->🚀 Features & Enhancements
+- Support strict mode with disabled implicit self-binding
+
+### <!-- 3 -->📚 Documentation
+- Internal ADR updates - implicit binding, injection points
+- Readme updates, better quickstart and entrypoint explanation
+
+### <!-- 7 -->🛠️ Under the hood
+- Don't create empty pipelines during release
+- Condense-markdown, update-adr-index agent skills
+- Cleanup pyproject.toml
+
 ## v0.1.8 (2026-03-19)
 ### <!-- 0 -->🚀 Features & Enhancements
 - ContextVar-based `@inject` decorator
