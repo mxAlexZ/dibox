@@ -8,7 +8,9 @@ image: ghcr.io/astral-sh/uv:python$PYTHON_VERSION-$BASE_LAYER
 
 workflow:
   rules:
-    - if: $CI_COMMIT_MESSAGE =~ /^CI Bot:/
+    - if: $CI_COMMIT_MESSAGE =~ /^CI Bot:/ && $CI_PIPELINE_SOURCE == "push"
+      when: never
+    - if: $CI_COMMIT_TAG && $CI_PIPELINE_SOURCE == "push"
       when: never
     - when: always
 
@@ -98,11 +100,28 @@ zuban:
   rules:
     - *merge_request
 
-prepare-release:
-  stage: build
+release-trigger:
+  stage: release
   rules:
     - *main_branch
   when: manual
+  inputs:
+    target_version:
+      default: patch
+      options: [patch, minor, major]
+  script:
+    - 'uv version --bump ${{ job.inputs.target_version }}'
+    - NEW_VERSION=$(uv version --short)
+    - echo "RELEASE_VERSION=${NEW_VERSION}" | tee variables.env
+  artifacts:
+    reports:
+      dotenv: variables.env
+
+prepare-release:
+  stage: release
+  rules:
+    - *main_branch
+  needs: [release-trigger]
   before_script:
     - apt-get -qq update && apt-get -qq install -y git openssh-client > /dev/null
     - eval $(ssh-agent -s)
@@ -115,34 +134,38 @@ prepare-release:
     - git config user.email "ci-bot@noreply.gitlab.com"
     - git fetch --tags origin
   script:
-    - uv version --bump patch
-    - NEW_VERSION=$(uv version --short)
-    - echo "RELEASE_VERSION=${NEW_VERSION}" | tee variables.env
-    - uvx git-cliff --tag "v${NEW_VERSION}" --unreleased --prepend CHANGELOG.md
-    - git add pyproject.toml uv.lock CHANGELOG.md
-    - 'git commit -m "CI Bot: Bump version to ${NEW_VERSION}"'
-    - git tag "v${NEW_VERSION}"
-    - git push -o ci.skip origin HEAD:$CI_COMMIT_BRANCH
-    - git push -o ci.skip origin "v${NEW_VERSION}"
+    - ': "${RELEASE_VERSION:?RELEASE_VERSION variable is required.}"'
+
+    - printf '\033[1;32m=== Creating release notes ====\033[0m\n'
+    - uv version ${RELEASE_VERSION}
+    - uvx git-cliff --tag "v${RELEASE_VERSION}" --unreleased --prepend CHANGELOG.md
     - uvx git-cliff --latest -o release_notes.md
-    - echo "--- Release notes ---" && cat release_notes.md
+    - printf '\033[1;32m=== Release notes ====\033[0m\n'
+    - cat release_notes.md
+
+    - printf '\033[1;32m=== Git changes ===\033[0m\n'
+    - git add pyproject.toml uv.lock CHANGELOG.md
+    - 'git commit -m "CI Bot: Bump version to ${RELEASE_VERSION}"'
+    - git tag "v${RELEASE_VERSION}"
+    - git push -o ci.skip origin HEAD:$CI_COMMIT_BRANCH
+    - git push -o ci.skip origin "v${RELEASE_VERSION}"
+
+    - printf '\033[1;32m=== Building package ===\033[0m\n'
     - uv build
   artifacts:
     paths:
       - release_notes.md
       - dist/
-    reports:
-      dotenv: variables.env
 
 create-release:
   stage: release
   rules:
     - *main_branch
-  needs: [prepare-release]
+  needs: [prepare-release, release-trigger]
   image: registry.gitlab.com/gitlab-org/cli:latest
-  before_script:
   script:
-    - echo "Creating release v${RELEASE_VERSION}"
+    - ': "${RELEASE_VERSION:?RELEASE_VERSION variable is required.}"'
+    - printf '\033[1;32m=== "Creating release v${RELEASE_VERSION} ===\033[0m\n'
   release:
     tag_name: "v${RELEASE_VERSION}"
     name: "Release v${RELEASE_VERSION}"
