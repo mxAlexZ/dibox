@@ -19,14 +19,15 @@ Async-native dependency injection framework based on type hints.
 - [QuickStart](#quickstart)
   - [1. Define your application as usual](#1-define-your-application-as-usual)
   - [2. Wire and Run](#2-wire-and-run)
-- [Advanced usage](#advanced-usage)
+- [Usage Guide](#usage-guide)
   - [Using Decorators for Injection](#using-decorators-for-injection)
   - [Resource Lifecycle](#resource-lifecycle)
-  - [Advanced Binding Patterns](#advanced-binding-patterns)
+    - [Binding Patterns](#binding-patterns)
     - [Binding Interfaces & Instances](#binding-interfaces--instances)
     - [Factory Functions](#factory-functions)
     - [Named dependencies](#named-dependencies)
     - [Dynamic Predicate-Based Binding](#dynamic-predicate-based-binding)
+    - [Strict Mode](#strict-mode)
   - [Binding Modules](#binding-modules)
     - [Organizing bindings by feature](#organizing-bindings-by-feature)
     - [Reusing modules across contexts](#reusing-modules-across-contexts)
@@ -56,16 +57,15 @@ DIBox is an async‑native dependency injection container that uses standard Pyt
 DIBox resolves, instantiates, and injects dependencies by following naturally defined type hints in constructors or entry points. It also orchestrates asynchronous startup and safe teardown for resources like database connections, credential loaders, or HTTP clients without extra glue code.
 
 ## Key Features
-- **Easy to Adopt:** Minimal concepts and minimal binding for most internal code.
-- **Pragmatic Auto-Wiring:** If a class can be constructed based on type hints, DIBox will build it. This convention-first approach eliminates nearly all factory boilerplate for your internal services.
-- **Async‑Native Core:** Seamlessly injects into async call chains and supports async factories out of the box.
-- **Lifecycle Automation:** Resources start and clean up automatically. DIBox recognizes context managers (including generator-based factories) and `start`/`close` conventions.
-- **Advanced Binding Options:** Supports predicate bindings, named injections, factory functions (with auto‑injected factory parameters), and modular binding organization.
-- **Non‑Invasive:** Works with any class using type hints—including third-party SDKs, dataclasses, and attrs — no wrappers or base classes required.
-- **Context-aware `@inject`:** Decorate entry points at import time, activate a container with `async with box:`, and `@inject` resolves dependencies from that context at call time. No container reference at the call site, no per-function wiring.
-- **No Global State Required:** Works equally well with local container instances — no hidden singletons, easy to isolate in unit tests.
-- **Two resolution styles:** Declarative decorators (`@inject`, `@box.inject`) provide signature-aware, import-time integration for frameworks; imperative `box.provide(...)` gives direct runtime control.
-- **Typed API:** The public API is strictly type-annotated, so it works well with type checkers and IDE autocompletion.
+- **Auto-Wiring:** Type-annotated constructors are resolved and injected automatically — no factory boilerplate.
+- **Async‑Native:** Async factories, async context managers, and async lifecycle hooks all work out of the box.
+- **Lifecycle Management:** Resources start and clean up automatically. DIBox recognizes context managers, generator factories and `start`/`close` conventions.
+- **Context-aware `@inject`:** Decorate at import time, resolve at call time from the active container — no container reference at the call site.
+- **Flexible Bindings:** Interfaces, instances, sync/async factories, named dependencies, and predicate-based bindings.
+- **Strict Mode:** `DIBox(strict=True)` requires all types to be explicitly registered — recommended for production.
+- **Non‑Invasive:** Works with any class using type hints — third-party SDKs, dataclasses, attrs — no wrappers or base classes required.
+- **Modular:** Group bindings into reusable `BindingBox` modules. Compose, override, and share across workers, tests, and entry points.
+- **Typed API:** Fully type-annotated — works seamlessly with type checkers and IDE autocompletion.
 
 ## QuickStart
 DIBox requires almost no setup. Define your classes as usual—whether you use standard Python classes with `__init__`, dataclasses, or attrs models.
@@ -137,7 +137,9 @@ async def run():
 asyncio.run(run())
 ```
 
-## Advanced usage
+> **Next step:** The quickstart uses DIBox's default permissive mode — unbound concrete types are auto-wired from their constructor. For production, `DIBox(strict=True)` is recommended. See [Strict Mode](#strict-mode).
+
+## Usage Guide
 
 ### Using Decorators for Injection
 Decorators allow injecting dependencies into entry points — API routes, CLI commands, Lambda handlers — without cluttering call sites. A key feature: `@inject` rewrites the function's runtime signature, removing `Injected[T]` parameters. Frameworks that inspect signatures at import/routing time only see your "real" parameters (path/query args, request objects, etc.).
@@ -260,7 +262,7 @@ box.bind(httpx.AsyncClient, create_http_client)
 
 Plain generator functions (without the decorator) are also accepted — DIBox wraps them automatically — but the explicit decorator is recommended for clarity.
 
-### Advanced Binding Patterns
+### Binding Patterns
 DIBox shines when you need precise control over object creation. You can mix and match these patterns to handle everything from cloud clients to dynamic configuration.
 
 #### Binding Interfaces & Instances
@@ -334,6 +336,24 @@ box.bind(lambda t: t.__name__.endswith("Settings"), load_settings)
 app_settings = await box.provide(AppSettings)
 db_settings = await box.provide(DBSettings)
 ```
+
+#### Strict Mode
+
+By default, DIBox operates in permissive mode: any concrete type with a type-annotated constructor is auto-wired without an explicit `bind()`. This is the fastest way to get started.
+
+For production applications, `DIBox(strict=True)` is recommended. It enforces that all dependencies must be explicitly registered, which prevents the container from silently auto-constructing a type that was meant to be configured. This makes dependency errors loud and immediate, preventing unexpected failures deep in a dependency chain.
+
+```python
+box = DIBox(strict=True)
+
+box.bind(AppConfig, instance=load_config())          # external value — always explicit
+box.bind(StorageClient, S3StorageClient)             # interface → implementation
+box.bind_many(Database, AuthService, ReportService)  # self-bind concrete services
+```
+
+`bind(T)` self-binds a type (equivalent to `bind(T, T)`). `bind_many(...)` registers several at once, turning strict mode's requirement into a compact declaration of what the container owns.
+
+Migrating from permissive to strict is straightforward: switch `DIBox()` to `DIBox(strict=True)` and add `bind(T)` for each concrete service that was being auto-wired. For most apps this is a handful of lines with an immediate payoff in predictability.
 
 ### Binding Modules
 
@@ -449,7 +469,7 @@ async def test_classifier():
 
 #### Resolution order
 
-When the same type is bound in multiple places, **last registered wins**: container's own `bind()` calls always take highest precedence, then modules in reverse registration order. If no binding matches at all, DIBox falls back to using the requested type as its own factory — this is what makes `await box.provide(SomeService)` work without an explicit `box.bind(SomeService)`.
+When the same type is bound in multiple places, **last registered wins**: container's own `bind()` calls always take highest precedence, then modules in reverse registration order. If no binding matches at all, DIBox falls back to using the requested type as its own factory — this is what makes `await box.provide(SomeService)` work without an explicit `box.bind(SomeService)`. This fallback is permissive mode behavior and can be disabled with `DIBox(strict=True)`; see [Strict Mode](#strict-mode).
 
 ## Why use DIBox?
 ### The Power of Auto-Wiring

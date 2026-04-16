@@ -18,7 +18,9 @@ class _ServiceImpl(_Service):
 
 class _Foo(_Service): ...
 
-class _Foo2(_Service): ...
+class _Foo2(_Service):
+    def __init__(self, tag: str = "_Foo2"):
+        super().__init__(tag)
 
 def _sync_factory():
     return _ServiceImpl("sync_f")
@@ -41,6 +43,9 @@ class BindingBoxTest:
     def _get_valid_bind_overload_case(self, box: BindingBox, test_id: str) -> tuple[type | None, str | None, str]:
         # requested_type, request_arg, expected_tag
         match test_id:
+            case "type":
+                box.bind(_ServiceImpl)
+                return _ServiceImpl, None, "impl"
             case "type, impl":
                 box.bind(_Service, _ServiceImpl)
                 return _Service, None, "impl"
@@ -99,6 +104,7 @@ class BindingBoxTest:
                 pytest.fail(f"Unknown test_id: {test_id}")
 
     @pytest.mark.parametrize("test_id", [
+        "type",
         "type, impl",
         "type, sync_factory",
         "type, async_factory",
@@ -127,8 +133,8 @@ class BindingBoxTest:
 
     def _make_conflicting_bind_overloads_case(self, box: BindingBox, test_id: str) -> None:
         match test_id:
-            case "(type)":
-                box.bind(_Service) # type: ignore
+            case "(predicate)":
+                box.bind(_is_foo) # type: ignore
             case "(type, type_selector=...)":
                 box.bind(_Service, type_selector=_Service) # type: ignore
             case "(type, name=...)":
@@ -152,11 +158,12 @@ class BindingBoxTest:
                 box.bind(_Service, "arg", target=_ServiceImpl, factory=_sync_factory) # type: ignore
             case "(type, arg, target, target)":
                 box.bind(_Service, "arg", _ServiceImpl, _ServiceImpl) # type: ignore
+            # case ""
             case _:
                 pytest.fail(f"Unknown test_id: {test_id}")
 
     @pytest.mark.parametrize("test_id", [
-        "(type)",
+        "(predicate)",
         "(type, type_selector=...)",
         "(type, name=...)",
         "(type, arg, name=...)",
@@ -319,3 +326,13 @@ class BindingBoxTest:
             start.assert_called_once()
             close.assert_not_called()
         close.assert_called_once()
+
+    def test_bind_many_registers_all_types(self):
+        box = BindingBox()
+        box.bind_many(_ServiceImpl, _Foo2)
+        t1 = box.find_binding(_ServiceImpl, None)[0]
+        assert t1 is not None
+        assert isinstance(t1.call_sync(), _ServiceImpl)
+        t2 = box.find_binding(_Foo2, None)[0]
+        assert t2 is not None
+        assert isinstance(t2.call_sync(), _Foo2)

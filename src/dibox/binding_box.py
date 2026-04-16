@@ -74,6 +74,10 @@ class BindingBox:
 
     @overload
     def bind(
+        self, type_selector: type[_T], **kwargs: Any
+    ) -> None: ...
+    @overload
+    def bind(
         self, type_selector: TypeSelector[_T], target: BindingTarget[_T], **kwargs: Any
     ) -> None: ...
     @overload
@@ -118,6 +122,9 @@ class BindingBox:
         Examples:
 
         ```python˘˘
+        # Self-binding
+        bind(Service)
+
         # Type -> implementation or factory
         bind(Service, ServiceImpl)
         bind(Service, lambda: ServiceImpl())
@@ -153,6 +160,15 @@ class BindingBox:
             args, kwargs, type_selector, name, target, factory, instance
         )
         self._add_binding(type_selector, name, factory_record)
+
+    def bind_many(self, *types: type[Any]) -> None:
+        """Convenience method to self-bind multiple types at once.
+
+        Equivalent to calling ``bind(T)`` for each provided type.
+        Useful in strict mode to reduce boilerplate when registering many concrete services.
+        """
+        for t in types:
+            self.bind(t)
 
     def find_binding(
         self, requested_type: TypeQuery[Any] | None, name: str | None
@@ -208,8 +224,13 @@ def _dispatch_bind_arguments(
                 name = None
     elif arg_count == 1:
         # bind(type_selector, target/factory/instance=...) or bind(type_selector, name=..., factory/instance=...)
+        # or bind(type_selector)
         _forbid_kwargs(type_selector)
         type_selector = args[0]
+        if factory is _MISSING and instance is _MISSING and target is _MISSING and name is _MISSING:
+            # bind(type_selector)
+            if isinstance(type_selector, type):
+                target = type_selector
     elif arg_count == 0:
         # All arguments are keyword-only
         ...

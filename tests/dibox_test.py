@@ -1,5 +1,5 @@
 from contextlib import AbstractContextManager, asynccontextmanager
-from typing import Any, AsyncGenerator, AsyncIterator, no_type_check
+from typing import Any, AsyncGenerator, AsyncIterator, cast, no_type_check
 from unittest.mock import MagicMock
 
 import pytest
@@ -22,28 +22,57 @@ class Foo:
         self.bar = bar
 
 
+@pytest.fixture(params=[False, True], ids=["loose", "strict"])
+def strict_mode(request: pytest.FixtureRequest) -> bool:
+    return cast(bool, request.param)
+
+
 class DIBoxProvideTest:
 
-    async def test_bound_subclass_is_instantiated_as_implementation(self):
-        box = DIBox()
+    async def test_bound_subclass_is_instantiated_as_implementation(self, strict_mode: bool):
+        box = DIBox(strict=strict_mode)
         box.bind(Bar, BarDerived, s="test")
         bar_instance = await box.provide(Bar)
         assert isinstance(bar_instance, BarDerived)
         assert bar_instance.s == "test"
 
-    async def test_bound_instance_is_returned_as_is(self):
-        box = DIBox()
+    async def test_bound_instance_is_returned_as_is(self, strict_mode: bool):
+        box = DIBox(strict=strict_mode)
         box.bind(Bar, instance=BarDerived(s="bound"))
         bar_instance = await box.provide(Bar)
         assert isinstance(bar_instance, BarDerived)
         assert bar_instance.s == "bound"
 
-    async def test_already_provided_instance_is_injected_into_new_type(self):
-        box = DIBox()
+    async def test_already_provided_instance_is_injected_into_new_type(self, strict_mode: bool):
+        box = DIBox(strict=strict_mode)
+        if strict_mode:
+            box.bind_many(Bar, Foo)
         bar_instance = await box.provide(Bar)  # bar = Bar()
         foo_instance = await box.provide(Foo)  # Foo(bar)
         assert isinstance(foo_instance, Foo)
         assert foo_instance.bar is bar_instance
+
+    @pytest.mark.parametrize(
+        ("type_request", "arg_name"),
+        [
+            (Bar, None),
+            (Bar, "arg"),
+            (Bar | Foo, None)
+        ]
+    )
+    async def test_provided_instance_is_reused_on_subsequent_provide(
+        self,
+        strict_mode: bool,
+        type_request: type[Any],
+        arg_name: str | None,
+    ):
+        box = DIBox(strict=strict_mode)
+        box.bind(Bar, factory=lambda: Bar(s="test"))
+
+        bar_instance1 = await box.provide(type_request, arg_name)
+        bar_instance2 = await box.provide(type_request, arg_name)
+
+        assert bar_instance1 is bar_instance2
 
     async def test_unregistered_concrete_type_is_auto_bound(self):
         box = DIBox()
@@ -55,25 +84,6 @@ class DIBoxProvideTest:
         foo = await box.provide(Foo)
         assert isinstance(foo, Foo)
         assert isinstance(foo.bar, Bar)
-
-    @pytest.mark.parametrize(
-        ("type_request", "arg_name"),
-        [
-            (Bar, None),
-            (Bar, "arg"),
-            (Bar | Foo, None)
-        ]
-    )
-    async def test_provided_instance_is_reused_on_subsequent_provide(self, type_request: type[Any], arg_name: str | None):
-        box = DIBox()
-        def bar_factory() -> Bar:
-            return Bar(s="test")
-        box.bind(Bar, factory=bar_factory)
-
-        bar_instance1 = await box.provide(type_request, arg_name)
-        bar_instance2 = await box.provide(type_request, arg_name)
-
-        assert bar_instance1 is bar_instance2
 
     async def test_unresolvable_constructor_arg_raises_on_provide(self):
         box = DIBox()
@@ -89,16 +99,28 @@ class DIBoxProvideTest:
             (Foo | Bar, "arg"),
             (None, "arg"),
         ],
-
     )
     async def test_non_concrete_type_raises_value_error(self, requested_type: Any, name: str | None):
         box = DIBox()
         with pytest.raises(ValueError, match="No binding found"):
             await box.provide(requested_type, name)
 
+    async def test_strict_mode_unregistered_type_raises_value_error(self):
+        box = DIBox(strict=True)
+        with pytest.raises(ValueError, match="No binding found"):
+            await box.provide(Bar)
+
+    async def test_strict_mode_unbound_transitive_dependency_raises_value_error(self):
+        box = DIBox(strict=True)
+        box.bind(Foo)  # Foo depends on Bar, which is not bound
+        with pytest.raises(ValueError, match="No binding found"):
+            await box.provide(Foo)
+
 class DIBoxGetTest:
-    async def test_get_returns_instance_created_by_provide(self):
-        box = DIBox()
+    async def test_get_returns_instance_created_by_provide(self, strict_mode: bool):
+        box = DIBox(strict=strict_mode)
+        if strict_mode:
+            box.bind_many(Bar, Foo)
         foo_provided = await box.provide(Foo)
         foo_resolved = box.get(Foo)
         assert foo_resolved is foo_provided
@@ -110,8 +132,8 @@ class DIBoxGetTest:
 
 
 class DIBoxInjectTest:
-    async def test_inject_decorator_supplies_bound_instance_to_annotated_param(self):
-        box = DIBox()
+    async def test_inject_decorator_supplies_bound_instance_to_annotated_param(self, strict_mode: bool):
+        box = DIBox(strict=strict_mode)
         box.bind(Bar, BarDerived(s="injected"))
         @box.inject
         async def func(bar: Injected[Bar]) -> str:
@@ -122,18 +144,18 @@ class DIBoxInjectTest:
 
 class DIBoxFactoriesTest:
 
-    async def test_async_factory_result_used_as_instance(self):
+    async def test_async_factory_result_used_as_instance(self, strict_mode: bool):
         async def bar_factory() -> Bar:
             return Bar(s="async factory")
-        box = DIBox()
+        box = DIBox(strict=strict_mode)
         box.bind(Bar, factory=bar_factory)
         bar_instance = await box.provide(Bar)
         assert isinstance(bar_instance, Bar)
         assert bar_instance.s == "async factory"
 
 
-    async def test_factory_dependencies_are_auto_provided_and_injected(self):
-        box = DIBox()
+    async def test_factory_dependencies_are_auto_provided_and_injected(self, strict_mode: bool):
+        box = DIBox(strict=strict_mode)
         async def foo_factory(bar: Bar) -> Foo:
             return Foo(bar)
         box.bind(Bar, instance=Bar(s="Yay"))
@@ -148,8 +170,8 @@ class DIBoxFactoriesTest:
         assert usual_bar_instance is foo_instance.bar
 
 
-    async def test_named_binding_is_injected_into_matching_factory_parameter(self):
-        box = DIBox()
+    async def test_named_binding_is_injected_into_matching_factory_parameter(self, strict_mode: bool):
+        box = DIBox(strict=strict_mode)
         async def foo_factory(special: Bar) -> Foo:
             return Foo(special)
         box.bind(Bar, BarDerived)
@@ -185,8 +207,8 @@ class DIBoxFactoriesTest:
         return factories[factory_style]
 
     @pytest.mark.parametrize("factory_style", ["no-annotation", "typed", "generic"])
-    async def test_factory_receives_matched_type_when_bound_by_predicate(self, factory_style: str):
-        box = DIBox()
+    async def test_factory_receives_matched_type_when_bound_by_predicate(self, strict_mode: bool, factory_style: str):
+        box = DIBox(strict=strict_mode)
         bar_factory = self._make_factory_for_predicate(factory_style)
         box.bind(lambda t: "Bar" in t.__name__, factory=bar_factory)
 

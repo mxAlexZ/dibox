@@ -1,6 +1,6 @@
 ## v0.1.8 (2026-03-19)
 ### <!-- 0 -->🚀 Features & Enhancements
-- Context-aware inject decorator
+- ContextVar-based `@inject` decorator
 
 ### <!-- 3 -->📚 Documentation
 - Add badges to the readme

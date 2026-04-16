@@ -1,6 +1,6 @@
 # EP: Resolution Modes
 
-**Status**: Proposed
+**Status**: Partially implemented — `strict` flag is implemented; zero-dependency guard (§3) is still proposed.
 
 This document defines the strategies the container uses to resolve dependencies. It proposes a configurable system that allows developers to choose between convenience and strictness.
 
@@ -54,7 +54,7 @@ Instead of enforcing one policy, DIBox will make the resolution strategy a confi
 
 ### 2.1. Container-Level `strict` Flag
 
-The `DIBox` constructor will accept a `strict` flag:
+The `DIBox` constructor accepts a `strict` flag:
 
 -   `DIBox(strict=False)` (Default)
     -   Behavior: Uses Implicit Self-Binding.
@@ -64,7 +64,7 @@ The `DIBox` constructor will accept a `strict` flag:
     -   Behavior: Enforces Explicit Binding.
     -   Use Case: Recommended for production applications, libraries, and mature codebases where safety, predictability, and clear intent are critical.
 
-This provides a clear path for projects to migrate from a permissive to a strict model as they mature without changing the fundamental DI paradigm.
+This gives projects a clear migration path from permissive to strict as they mature, without changing the fundamental DI paradigm.
 
 ### 2.2. Per-Call Overrides (Idea)
 
@@ -79,9 +79,9 @@ This idea is documented for completeness but is not part of the immediate implem
 
 ---
 
-## 3. Mitigation for Permissive Mode: The Zero-Dependency Guard
+## 3. Proposed: Zero-Dependency Guard for Permissive Mode
 
-To reduce the risks of the default `strict=False` mode, a safeguard will be implemented to prevent the most common and problematic cases of unintended construction.
+To reduce the risks of the default `strict=False` mode, a safeguard is proposed to prevent the most common and problematic cases of unintended construction.
 
 -   Rule: The container will refuse to auto-construct any type that can be initialized with zero required arguments.
 -   Mechanism: It inspects the type's `__init__` signature. If all parameters have defaults (or there are no parameters), it is blacklisted from implicit self-binding.

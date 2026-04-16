@@ -4,12 +4,26 @@
 ## Basic usage:
  Separate arguments for different binding types:
 ```python
+box.bind(type)
 box.bind(type, target)
 box.bind(type, name, target)
 box.bind(type, name, factory=...)
 box.bind(type, name, instance=...)
 box.bind(type, name, target=...)
 ```
+
+
+`bind(T)` with a single type argument self-binds a concrete type — equivalent to `bind(T, T)`. This is
+primarily useful in `strict=True` mode where implicit self-binding is disabled and every managed type must
+be registered explicitly, without the noise of repeating the name twice:
+
+```python
+box.bind(ServiceA)
+box.bind_many(ServiceA, ServiceB, ServiceC)  # convenience: self-binds each type
+```
+
+`bind_many(*types)` is a thin wrapper that calls `bind(T)` for each type. No new binding model —
+resolution, precedence, and override behavior are unchanged.
 
 ## Yield and context managers
 

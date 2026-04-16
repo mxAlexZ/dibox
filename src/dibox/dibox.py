@@ -22,32 +22,16 @@ class DIBox(BindingBox):
 
     It works as an async context manager, allowing for proper cleanup of
     resources.
-
-    Usage example:
-    ```python
-    box = DIBox()
-    # Bind a base class to a specific implementation
-    box.bind(Service, ServiceImpl)
-    # Dynamic binding: create any requested *Config class using a custom loader
-    box.bind(lambda t: t.__name__.endswith("Config"), lambda config_type: load_config(config_type))
-
-    async with box:
-        # Concrete classes don't need special binding and can be resolved automatically,
-        # including its dependencies.
-        concrete_service = await box.provide(MyService)
-        # Get an instance of Service, DIBox will create ServiceImpl and any of its dependencies.
-        service = await box.provide(Service)
-        # Provide DbConfig, which matches the predicate and will be created by the factory function.
-        db_config = await box.provide(DbConfig)
     """
 
     _context_box: ClassVar[ContextVar["DIBox"]] = ContextVar("dibox")
 
-    def __init__(self) -> None:
+    def __init__(self, strict: bool = False) -> None:
         self.instances = InstanceBox()
         self.injector = Injector(self)
         self.modules: list[BindingBox] = []
         self._context_token: Token["DIBox"] | None = None
+        self._is_strict = strict
         super().__init__()
 
     @classmethod
@@ -171,9 +155,9 @@ class DIBox(BindingBox):
         logger.debug("Creating instance of %s: %s...", name, requested_type)
         binding_record, (matched_type, matched_arg) = self.find_binding(requested_type, name)
         if binding_record is None:
-            # auto-bind to the requested type if it's a concrete class
-            if not isinstance(requested_type, type):
+            if self._is_strict or not isinstance(requested_type, type):
                 raise ValueError(f"No binding found for ({requested_type}, {name})")
+            # implicit self-bind to the requested type if it's a concrete class
             binding_record = BindingRecord(
                 async_factory=None,
                 sync_factory=requested_type,
