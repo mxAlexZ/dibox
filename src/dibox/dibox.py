@@ -1,12 +1,14 @@
 import inspect
 import logging
 from contextvars import ContextVar, Token
-from typing import Any, Awaitable, Callable, ClassVar, TypeVar, get_origin, overload
+from typing import Any, Awaitable, Callable, ClassVar, TypeGuard, TypeVar, get_origin, overload
 
 from .binding_box import BindingBox, BindingRecord
 from .dimap import ArgNameQuery, DIMapKey, TypeQuery
 from .injector import Injector
 from .instance_box import InstanceBox
+from .resolution_error import ResolutionError
+from .resolution_stack import ResolutionStack, format_frame, format_type
 
 _T = TypeVar("_T")
 _R = TypeVar("_R")
@@ -117,11 +119,7 @@ class DIBox(BindingBox):
         Returns:
             The existing or freshly created instance matching the type and name criteria.
         """
-        existing_instance = self.instances.get_instance(requested_type, name)
-        if existing_instance is not None:
-            return existing_instance
-        new_instance = await self._create_instance(requested_type, name)
-        return new_instance
+        return await self._get_or_create_instance(requested_type, name, resolution_stack=[])
 
     def get(self, requested_type: TypeQuery[_T], name: ArgNameQuery = None) -> _T:
         """Retrieves an existing instance using type and optional name matching.
@@ -151,35 +149,78 @@ class DIBox(BindingBox):
         """Closes the container and cleans up all created instances."""
         await self.instances.close()
 
-    async def _create_instance(self, requested_type: TypeQuery[_T], name: ArgNameQuery) -> _T:
-        logger.debug("Creating instance of %s: %s...", name, requested_type)
-        binding_record, (matched_type, matched_arg) = self.find_binding(requested_type, name)
-        if binding_record is None:
-            if self._is_strict or not isinstance(requested_type, type):
-                raise ValueError(f"No binding found for ({requested_type}, {name})")
-            # implicit self-bind to the requested type if it's a concrete class
-            binding_record = BindingRecord(
-                async_factory=None,
-                sync_factory=requested_type,
-                signature_info=inspect.signature(requested_type)
-            )
-            matched_type, matched_arg = requested_type, None
+    async def _get_or_create_instance(
+        self,
+        requested_type: TypeQuery[_T],
+        name: ArgNameQuery,
+        resolution_stack: ResolutionStack,
+    ) -> _T:
+        existing_instance = self.instances.get_instance(requested_type, name)
+        if existing_instance is not None:
+            return existing_instance
+        new_instance = await self._create_instance(requested_type, name, resolution_stack)
+        return new_instance
 
-        # the first argument can be used as a type of the dependency to be created
-        # That's likely needs to be done only for predicate matching, but currently we can't distinguish them
-        args_override = self._bind_factory_type_argument(matched_type, binding_record)
-        args = await self._provide_dependencies(binding_record, args_override)
+    async def _create_instance(
+        self,
+        requested_type: TypeQuery[_T],
+        name: ArgNameQuery,
+        resolution_stack: ResolutionStack,
+    ) -> _T:
+        resolution_stack.append((requested_type, name))
+        try:
+            binding_record, (matched_type, matched_arg) = self.find_binding(requested_type, name)
+            if binding_record is None:
+                # implicit self-binding for concrete classes in non-strict mode
+                binding_record, matched_type = self._make_impicit_binding_record(requested_type, resolution_stack)
+                matched_arg = None
+            if logger.isEnabledFor(logging.DEBUG):
+                parent = resolution_stack[-2] if len(resolution_stack) > 1 else None
+                parent_part = f" (as dependency of {format_type(parent[0])})" if parent is not None else ""
+                requested = format_frame(requested_type, name)
+                logger.debug("Creating instance %s %s", requested, parent_part)
+            # the first argument can be used as a type of the dependency to be created
+            # That's likely needs to be done only for predicate matching, but currently we can't distinguish them
+            args_override = self._bind_factory_type_argument(matched_type, binding_record)
+            args = await self._provide_dependencies(binding_record, args_override, resolution_stack)
+        finally:
+            resolution_stack.pop()
         instance: _T = await self.instances.create_instance(matched_type, matched_arg, binding_record, **args)
-        logger.debug("Instance of %s: %s was created", matched_type, matched_arg)
         return instance
 
-    async def _provide_dependencies(self, consumer: BindingRecord, args_override: dict[str, Any]) -> dict[str, Any]:
+    def _make_impicit_binding_record(
+        self,
+        requested_type: TypeQuery[_T],
+        resolution_stack: ResolutionStack,
+    ) -> tuple[BindingRecord, type[_T]]:
+        if not self._is_autowireable(requested_type):
+            reason = "no binding found" if self._is_strict else "requested type is not a concrete class"
+            raise ResolutionError(reason, resolution_stack)
+        binding_record = BindingRecord(
+            async_factory=None, sync_factory=requested_type, signature_info=inspect.signature(requested_type)
+        )
+        return binding_record, requested_type
+
+    def _is_autowireable(self, requested_type: TypeQuery[Any]) -> TypeGuard[type]:
+        if self._is_strict or not isinstance(requested_type, type):
+            return False
+        try:
+            _ = inspect.signature(requested_type)
+        except (ValueError, TypeError):
+            # C extensions, special forms — treat as blacklisted
+            return False
+        return True
+
+    async def _provide_dependencies(
+        self,
+        consumer: BindingRecord,
+        args_override: dict[str, Any],
+        resolution_stack: ResolutionStack,
+    ) -> dict[str, Any]:
         args = self._list_dependencies(consumer, args_override)
         dependencies: dict[str, Any] = {}
         for arg_name, arg_type in args:
-            # In theory, we can compose dependency graph
-            # and visualize it with graphviz or something
-            dependencies[arg_name] = await self.provide(arg_type, arg_name)
+            dependencies[arg_name] = await self._get_or_create_instance(arg_type, arg_name, resolution_stack)
         dependencies |= args_override
         return dependencies
 

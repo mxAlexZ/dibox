@@ -130,7 +130,7 @@ prepare-release:
     - chmod 700 ~/.ssh
     - ssh-keyscan ${CI_SERVER_HOST} >> ~/.ssh/known_hosts
     - git remote set-url origin "git@${CI_SERVER_HOST}:${CI_PROJECT_PATH}.git"
-    - git config user.name "GitLab CI"
+    - git config user.name "GitLab CI Bot"
     - git config user.email "ci-bot@noreply.gitlab.com"
     - git fetch --tags origin
   script:

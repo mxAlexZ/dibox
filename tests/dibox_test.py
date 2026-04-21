@@ -1,11 +1,13 @@
+import re
 from contextlib import AbstractContextManager, asynccontextmanager
 from typing import Any, AsyncGenerator, AsyncIterator, cast, no_type_check
+from unittest import mock
 from unittest.mock import MagicMock
 
 import pytest
 from attrs import define
 
-from dibox import DIBox, Injected
+from dibox import DIBox, Injected, ResolutionError
 from dibox.binding_box import BindingBox, FactoryFunc
 
 
@@ -102,19 +104,52 @@ class DIBoxProvideTest:
     )
     async def test_non_concrete_type_raises_value_error(self, requested_type: Any, name: str | None):
         box = DIBox()
-        with pytest.raises(ValueError, match="No binding found"):
+        with pytest.raises(ResolutionError, match="not a concrete class"):
             await box.provide(requested_type, name)
 
-    async def test_strict_mode_unregistered_type_raises_value_error(self):
+    async def test_strict_mode_unregistered_type_raises_resolution_error(self):
         box = DIBox(strict=True)
-        with pytest.raises(ValueError, match="No binding found"):
+        with pytest.raises(ResolutionError, match="no binding found"):
             await box.provide(Bar)
 
-    async def test_strict_mode_unbound_transitive_dependency_raises_value_error(self):
+    async def test_strict_mode_unbound_transitive_dependency_raises_resolution_error(self):
+        # TODO: probably this test is redundant
         box = DIBox(strict=True)
         box.bind(Foo)  # Foo depends on Bar, which is not bound
-        with pytest.raises(ValueError, match="No binding found"):
+        with pytest.raises(ResolutionError, match="no binding found"):
             await box.provide(Foo)
+
+    async def test_resolution_stack_included_in_exception(self):
+        class A:
+            def __init__(self, foo: Foo, value: int): ...
+        class B:
+            def __init__(self, a: A): ...
+        box = DIBox()
+
+        with pytest.raises(ResolutionError, match="not a concrete class") as exc_info:
+            await box.provide(B)
+        error = exc_info.value
+        message = str(error)
+        assert re.search(r"(value: int).*(a: .*A).*(B)", message, re.DOTALL)
+        assert "Foo" not in message
+        assert error.resolution_stack == [(B, None), (A, "a"), (int, "value")]
+
+    async def test_log_message_includes_matched_type_and_arg(self):
+        box = DIBox()
+        box.bind(Bar, BarDerived, s="test")
+        with (
+            mock.patch("dibox.dibox.logger.debug") as logger_mock,
+            mock.patch("dibox.dibox.logger.isEnabledFor", return_value=True)
+        ):
+            await box.provide(Foo)
+
+        assert logger_mock.call_count == 2
+
+        debug_args = [c.args[1:] for c in logger_mock.call_args_list]
+        assert debug_args[0][0] == "Foo"
+        assert debug_args[1][0] == "bar: Bar"
+        assert "Foo" in debug_args[1][1]
+
 
 class DIBoxGetTest:
     async def test_get_returns_instance_created_by_provide(self, strict_mode: bool):
