@@ -18,8 +18,14 @@ Design principle: Progressive Disclosure of Complexity — zero-config defaults 
 - Tests: `uv run pytest`
 - Type checking: `uv run pyright`
 
+## Context Workflow
+For non-trivial tasks — feature work, design changes, questions, or anything touching behavior, trade-offs, or architecture — consult ADRs first. Skip for purely mechanical edits (imports, renaming, formatting).
+- Start from `docs/adrs/index.md`; Use index summaries to read 2-4 most relevant ADRs; expand reads only if open questions remain.
+- Treat source code as implementation truth; treat ADRs as rationale and design intent.
+- If ADR and code diverge, call it out and propose minimal updates.
+- When writing or updating ADRs, use the `update-adr` skill.
+
 ## Documentation
 - `README.md`: public-facing intro and usage examples.
-- `docs/adrs/`: ADRs (Architecture Decision Records) — design decisions, trade-offs, open questions. Keep up to date with the codebase.
-- Before starting a complex task, read `docs/adrs/index.md` to find and load relevant ADRs.
-- When writing ADRs: focus on the 'why' (decisions, DX, trade-offs). Concise, use file-path cross-links, no detailed implementation notes.
+- `docs/adrs/`: ADR design context database — decisions, trade-offs, and open questions.
+- `docs/adrs/index.md`: ADR entrypoint and content map for targeted retrieval.

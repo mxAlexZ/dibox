@@ -4,10 +4,10 @@ Documentation for giving LLMs and humans a clear context of the design decisions
 
 The documents can contain unpolished ideas. It is not part of the public documentation.
 
-## For AI assistants
-Before working on a complex problem, check this index and read the relevant ADR documents to understand the context. Verify exact details against the source code, but use the ADRs to understand the 'why' behind the design decisions and the open questions. When writing ADRs, focus on the 'why': architectural decisions, developer experience, trade-offs, and open questions. Avoid detailed implementation notes, keep in concise and use file path references for cross-linking.
+See [adr_concept.md](adr_concept.md) for ADR purpose and lifecycle; see repository instructions for retrieval and update workflow.
 
 ## Index
+ - [adr_concept.md](adr_concept.md): why ADRs exist, information economics, delivery leverage, lifecycle stages, and why maintenance matters
  - [bind_api.md](bind_api.md): `bind(...)` forms, generator/contextmanager factories, setup-teardown resources, rejected fluent APIs
  - [binding_modules.md](binding_modules.md): `BindingBox` modules, `add_bindings`, precedence/overrides, module naming, module-level cycle detection
  - [diagnostics.md](diagnostics.md): Resolution stack errors, cycle detection, `validate()`/`graph()`, strict vs permissive diagnostics coverage
