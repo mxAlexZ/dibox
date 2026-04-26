@@ -1,3 +1,14 @@
+## v0.1.10 (2026-04-26)
+### <!-- 0 -->🚀 Features & Enhancements
+- Show resolution stack in errors and logs
+
+### <!-- 3 -->📚 Documentation
+- ADR concept documentation, ADR updade agent skill
+- Structured ADR index and proposal of semi-strict resolution mode
+
+### <!-- 7 -->🛠️ Under the hood
+- Clean up ci pipeline and improve triggers
+
 ## v0.1.9 (2026-04-16)
 ### <!-- 0 -->🚀 Features & Enhancements
 - Support strict mode with disabled implicit self-binding
