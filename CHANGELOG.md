@@ -3,7 +3,7 @@
 - Show resolution stack in errors and logs
 
 ### <!-- 3 -->📚 Documentation
-- ADR concept documentation, ADR updade agent skill
+- ADR concept documentation, ADR update agent skill
 - Structured ADR index and proposal of semi-strict resolution mode
 
 ### <!-- 7 -->🛠️ Under the hood

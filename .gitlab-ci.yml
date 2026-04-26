@@ -139,16 +139,17 @@ prepare-release:
     - printf '\033[1;32m=== Creating release notes ====\033[0m\n'
     - uv version ${RELEASE_VERSION}
     - uvx git-cliff --tag "v${RELEASE_VERSION}" --unreleased --prepend CHANGELOG.md
-    - uvx git-cliff --latest -o release_notes.md
-    - printf '\033[1;32m=== Release notes ====\033[0m\n'
-    - cat release_notes.md
 
     - printf '\033[1;32m=== Git changes ===\033[0m\n'
     - git add pyproject.toml uv.lock CHANGELOG.md
     - 'git commit -m "CI Bot: Bump version to ${RELEASE_VERSION}"'
     - git tag "v${RELEASE_VERSION}"
-    - git push -o ci.skip origin HEAD:$CI_COMMIT_BRANCH
-    - git push -o ci.skip origin "v${RELEASE_VERSION}"
+    - git push origin HEAD:$CI_COMMIT_BRANCH
+    - git push origin "v${RELEASE_VERSION}"
+
+    - uvx git-cliff --latest -o release_notes.md
+    - printf '\033[1;32m=== Release notes ====\033[0m\n'
+    - cat release_notes.md
 
     - printf '\033[1;32m=== Building package ===\033[0m\n'
     - uv build
@@ -165,7 +166,7 @@ create-release:
   image: registry.gitlab.com/gitlab-org/cli:latest
   script:
     - ': "${RELEASE_VERSION:?RELEASE_VERSION variable is required.}"'
-    - printf '\033[1;32m=== "Creating release v${RELEASE_VERSION} ===\033[0m\n'
+    - printf "\033[1;32m=== Creating release v${RELEASE_VERSION} ===\033[0m\n"
   release:
     tag_name: "v${RELEASE_VERSION}"
     name: "Release v${RELEASE_VERSION}"
