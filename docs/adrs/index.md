@@ -6,18 +6,29 @@ The documents can contain unpolished ideas. It is not part of the public documen
 
 See [adr_concept.md](adr_concept.md) for ADR purpose and lifecycle; see repository instructions for retrieval and update workflow.
 
-## Index
+## Meta
+ADRs that define the ecosystem and guiding principles. Read first when onboarding or before writing new ADRs.
  - [adr_concept.md](adr_concept.md): why ADRs exist, information economics, delivery leverage, lifecycle stages, and why maintenance matters
- - [bind_api.md](bind_api.md): `bind(...)` forms, generator/contextmanager factories, setup-teardown resources, rejected fluent APIs
- - [binding_modules.md](binding_modules.md): `BindingBox` modules, `add_bindings`, precedence/overrides, module naming, module-level cycle detection
- - [diagnostics.md](diagnostics.md): Resolution stack errors, cycle detection, `validate()`/`graph()`, strict vs permissive diagnostics coverage
- - [entrypoints.md](entrypoints.md): `@inject`, `Injected[T]`, signature rewriting, `container.call()`/`partial()`, `Injector`, mode-dependent behavior
- - [package_binding.md](package_binding.md): `PackageBindingBox` scanning, auto-self-binding filters, dataclass exclusion, zero-dependency guard, lazy import caveats
- - [named_bindings.md](named_bindings.md): Argument-name matching limits, `Annotated` + `Named`/`Token`, third-party integration, `NewType` alternative
- - [scopes.md](scopes.md): Scope lifetimes via `DIBox(parent=...)`, ownership/shadowing rules, resolver/contextvar integration, `scope=` trade-offs
- - [scopes_sketch.py](scopes_sketch.py): Pipeline/Ray scope scenarios, app-run-stage nesting, `@inject` contextvars, `container.call()`, module reuse
- - [resolution_modes.md](resolution_modes.md): Implicit self-binding vs explicit binding, `strict` flag, zero-dependency guard, safety/convenience trade-offs
- - [factories.md](factories.md): Proposal for call-time factory args, container-aware factories, dynamic/context-driven dependency creation
- - [sync_async.md](sync_async.md): Sync-mode limitations and proposals for `get()`/`provide_sync()` plus sync factory behavior
- - [philosophy.md](philosophy.md): Progressive disclosure of complexity: zero-config defaults with explicit advanced controls
- - [ideas.md](ideas.md): Roadmap and deferred ideas: overrides, startup initialization, resolver args, signature modes, archived decisions
+ - [philosophy.md](philosophy.md): progressive disclosure of complexity — zero-config defaults with explicit advanced controls
+ - [ideas.md](ideas.md): active roadmap (testing override API, startup initialization), deferred proposals (resolver args, non-destructive signature mode, per-call strict), archived decisions
+
+## Binding
+How dependencies are declared, registered, and organized into modules.
+ - [bind_api.md](bind_api.md): `bind(...)` argument forms, `bind_many`, generator/contextmanager factory support, rejected fluent APIs
+ - [binding_modules.md](binding_modules.md): `BindingBox` as standalone binding collection, `add_bindings`, last-registered-wins precedence, parameterized and scoped modules, named-module diagnostics, future module-level cycle detection
+ - [package_binding.md](package_binding.md): `PackageBindingBox` package scanning, auto-self-binding filters, dataclass exclusion, lazy import caveats, cycle detection integration
+ - [named_bindings.md](named_bindings.md): argument-name matching as default, `Annotated` + `Named`/`Token` as explicit override, `NewType` alternative, third-party integration pattern
+
+## Resolution & Runtime
+How the container resolves dependencies, manages instance lifetimes, and exposes injection entrypoints.
+ - [resolution_modes.md](resolution_modes.md): implicit self-binding vs. explicit binding, `strict` flag, zero-dependency guard, safety/convenience trade-offs
+ - [entrypoints.md](entrypoints.md): `@inject` + contextvar container resolution, `Injected[T]` + signature rewriting, `container.call()`/`partial()`, `Injector`, mode-dependent behavior
+ - [semi_strict_mode.md](semi_strict_mode.md): Proposed middle mode (explicit roots + implicit transitive expansion), required guardrails, and strict-bool-to-mode API migration questions
+ - [scopes.md](scopes.md): `DIBox(parent=...)` nesting as scope primitive, instance ownership/shadowing rules, contextvar-based `@inject` for framework integration, why `scope=` on `bind()` was rejected
+ - [scopes_sketch.py](scopes_sketch.py): pipeline/Ray scope scenarios, app-run-stage nesting, `container.call()`, module reuse
+ - [factories.md](factories.md): proposal for call-time factory args and container-aware factories for dynamic/context-driven dependency creation
+ - [sync_async.md](sync_async.md): sync mode current limitation (`get()` only), proposed `provide_sync()` and sync factory behavior
+
+## Developer Experience
+Tools for debugging, validation, and observability.
+ - [diagnostics.md](diagnostics.md): resolution stack errors, cycle detection, `validate()`/`graph()` for proactive validation, strict vs. permissive impact on diagnostics coverage

@@ -124,3 +124,5 @@ B. `strict=True` (Explicit)
 -   Best Practice: Encourages explicit intent
 
 This model allows developers to make a conscious choice, starting with convenience and opting into strictness as the application's requirements evolve.
+
+Note: there's a proposed third, intermediate mode described in [Semi-Strict Resolution](./semi_strict_mode.md) with explicit roots but implicit transitive expansion.
