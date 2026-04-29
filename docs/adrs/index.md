@@ -21,9 +21,10 @@ How dependencies are declared, registered, and organized into modules.
 
 ## Resolution & Runtime
 How the container resolves dependencies, manages instance lifetimes, and exposes injection entrypoints.
- - [resolution_modes.md](resolution_modes.md): implicit self-binding vs. explicit binding, `strict` flag, zero-dependency guard, safety/convenience trade-offs
+ - [implicit_self_binding.md](implicit_self_binding.md): permissive implicit self-binding, confusion with auto-wiring, zero-dependency guard proposal, and limits of convenience-first resolution
+ - [strict_mode.md](strict_mode.md): strict-mode explicit-binding contract, fail-fast semantics, migration path from permissive defaults
  - [entrypoints.md](entrypoints.md): `@inject` + contextvar container resolution, `Injected[T]` + signature rewriting, `container.call()`/`partial()`, `Injector`, mode-dependent behavior
- - [semi_strict_mode.md](semi_strict_mode.md): Proposed middle mode (explicit roots + implicit transitive expansion), required guardrails, and strict-bool-to-mode API migration questions
+ - [semi_strict_mode.md](semi_strict_mode.md): implemented middle mode (explicit roots + implicit transitive expansion), with open introspection-surface questions and optional safety-filter follow-ups
  - [scopes.md](scopes.md): `DIBox(parent=...)` nesting as scope primitive, instance ownership/shadowing rules, contextvar-based `@inject` for framework integration, why `scope=` on `bind()` was rejected
  - [scopes_sketch.py](scopes_sketch.py): pipeline/Ray scope scenarios, app-run-stage nesting, `container.call()`, module reuse
  - [factories.md](factories.md): proposal for call-time factory args and container-aware factories for dynamic/context-driven dependency creation

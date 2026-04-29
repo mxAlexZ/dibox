@@ -27,7 +27,7 @@ Async-native dependency injection framework based on type hints.
     - [Factory Functions](#factory-functions)
     - [Named dependencies](#named-dependencies)
     - [Dynamic Predicate-Based Binding](#dynamic-predicate-based-binding)
-    - [Strict Mode](#strict-mode)
+    - [Resolution Modes](#resolution-modes)
   - [Binding Modules](#binding-modules)
     - [Organizing bindings by feature](#organizing-bindings-by-feature)
     - [Reusing modules across contexts](#reusing-modules-across-contexts)
@@ -62,7 +62,7 @@ DIBox resolves, instantiates, and injects dependencies by following naturally de
 - **Lifecycle Management:** Resources start and clean up automatically. DIBox recognizes context managers, generator factories and `start`/`close` conventions.
 - **Context-aware `@inject`:** Decorate at import time, resolve at call time from the active container — no container reference at the call site.
 - **Flexible Bindings:** Interfaces, instances, sync/async factories, named dependencies, and predicate-based bindings.
-- **Strict Mode:** `DIBox(strict=True)` requires all types to be explicitly registered — recommended for production.
+- **Resolution Modes:** Permissive mode for zero-config onboarding; semi-strict for explicit root ownership with implicit binding for internal dependencies; strict for exhaustive explicit control.
 - **Non‑Invasive:** Works with any class using type hints — third-party SDKs, dataclasses, attrs — no wrappers or base classes required.
 - **Modular:** Group bindings into reusable `BindingBox` modules. Compose, override, and share across workers, tests, and entry points.
 - **Typed API:** Fully type-annotated — works seamlessly with type checkers and IDE autocompletion.
@@ -137,7 +137,7 @@ async def run():
 asyncio.run(run())
 ```
 
-> **Next step:** The quickstart uses DIBox's default permissive mode — unbound concrete types are auto-wired from their constructor. For production, `DIBox(strict=True)` is recommended. See [Strict Mode](#strict-mode).
+> **Next step:** The quickstart uses permissive mode (the default), where unbound concrete types are automatically created (implicitly self-bound). For non-trivial apps, semi-strict or strict mode is recommended. See [Resolution Modes](#resolution-modes).
 
 ## Usage Guide
 
@@ -337,23 +337,45 @@ app_settings = await box.provide(AppSettings)
 db_settings = await box.provide(DBSettings)
 ```
 
-#### Strict Mode
+#### Resolution Modes
 
-By default, DIBox operates in permissive mode: any concrete type with a type-annotated constructor is auto-wired without an explicit `bind()`. This is the fastest way to get started.
-
-For production applications, `DIBox(strict=True)` is recommended. It enforces that all dependencies must be explicitly registered, which prevents the container from silently auto-constructing a type that was meant to be configured. This makes dependency errors loud and immediate, preventing unexpected failures deep in a dependency chain.
+DIBox supports three resolution modes, set at construction time:
 
 ```python
-box = DIBox(strict=True)
+box = DIBox()                    # permissive (default)
+box = DIBox(mode="semi-strict")  # semi-strict
+box = DIBox(mode="strict")       # strict
+```
+
+What changes is _implicit self-binding_: whether the container is allowed to treat an unbound concrete type as its own factory when no `bind()` entry exists for it.
+
+**Permissive (default)** — any concrete type with a type-annotated constructor is implicitly self-bound: it resolves without an explicit `bind()`. The QuickStart examples use this mode. It is the fastest way to get going, but container ownership becomes implicit: any reachable concrete type resolves without error, which can mask misconfiguration as the app grows.
+
+**Semi-strict (recommended for most apps)** — declare which types are owned resolution roots with `bind()`; the container implicitly self-binds their concrete transitive dependencies. Ownership is explicit at the boundary — where it matters — without requiring pre-registration of every interior implementation detail.
+
+```python
+box = DIBox(mode="semi-strict")
 
 box.bind(AppConfig, instance=load_config())          # external value — always explicit
 box.bind(StorageClient, S3StorageClient)             # interface → implementation
-box.bind_many(Database, AuthService, ReportService)  # self-bind concrete services
+box.bind_many(Database, AuthService, ReportService)  # root services; transitive concrete deps implicitly self-bound
 ```
 
-`bind(T)` self-binds a type (equivalent to `bind(T, T)`). `bind_many(...)` registers several at once, turning strict mode's requirement into a compact declaration of what the container owns.
+Types that cannot be inferred — interfaces, external values, raw parameters — still need explicit bindings regardless of mode. Implicit self-binding only fills in concrete intermediate services that have no configuration decisions.
 
-Migrating from permissive to strict is straightforward: switch `DIBox()` to `DIBox(strict=True)` and add `bind(T)` for each concrete service that was being auto-wired. For most apps this is a handful of lines with an immediate payoff in predictability.
+**Strict** — every type in the dependency graph must be explicitly registered. Implicit self-binding is disabled: the container raises an error for any unbound type. Preferred when you want exhaustive, registry-level visibility over every type the container may resolve.
+
+```python
+box = DIBox(mode="strict")
+
+box.bind(AppConfig, instance=load_config())          # external value
+box.bind(StorageClient, S3StorageClient)             # interface → implementation
+box.bind_many(Database, AuthService, ReportService)  # every concrete type must be declared
+```
+
+`bind(T)` self-binds a type (equivalent to `bind(T, T)`). `bind_many(...)` registers several at once, turning the registration requirement into a compact ownership declaration.
+
+Migrating from permissive: switch `DIBox()` to `DIBox(mode="semi-strict")` or `DIBox(mode="strict")` and add explicit bindings for the types the container should own. For most apps this is a handful of lines.
 
 ### Binding Modules
 
@@ -469,7 +491,8 @@ async def test_classifier():
 
 #### Resolution order
 
-When the same type is bound in multiple places, **last registered wins**: container's own `bind()` calls always take highest precedence, then modules in reverse registration order. If no binding matches at all, DIBox falls back to using the requested type as its own factory — this is what makes `await box.provide(SomeService)` work without an explicit `box.bind(SomeService)`. This fallback is permissive mode behavior and can be disabled with `DIBox(strict=True)`; see [Strict Mode](#strict-mode).
+When the same type is bound in multiple places, **last registered wins**: container's own `bind()` calls always take highest precedence, then modules in reverse registration order.
+If no binding matches at all, DIBox falls back to using the requested type as its own factory — this is what makes `await box.provide(SomeService)` work without an explicit `box.bind(SomeService)`. This fallback is permissive mode behavior; semi-strict restricts it to transitive dependencies only, and strict disables it entirely. See [Resolution Modes](#resolution-modes).
 
 ## Why use DIBox?
 ### The Power of Auto-Wiring

@@ -52,9 +52,6 @@ The current implementation is always destructive: injected parameters are remove
 
 Demand is likely lower for framework entry points (destructive mode is usually preferred there) but potentially meaningful for internal tooling and reflection-heavy code. `SignatureModification` exists in source as a placeholder; not yet wired.
 
-**Per-call `strict` override** — override the container-wide `strict` policy on a single call: `await box.provide(Service, strict=True)`. Documented in [EP: Resolution Modes](./resolution_modes.md) §2.2. Not part of the immediate implementation plan.
-
----
 
 ## Archived decisions
 

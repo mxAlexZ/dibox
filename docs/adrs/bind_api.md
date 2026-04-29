@@ -14,7 +14,7 @@ box.bind(type, name, target=...)
 
 
 `bind(T)` with a single type argument self-binds a concrete type — equivalent to `bind(T, T)`. This is
-primarily useful in `strict=True` mode where implicit self-binding is disabled and every managed type must
+primarily useful in strict mode where implicit self-binding is disabled and every managed type must
 be registered explicitly, without the noise of repeating the name twice:
 
 ```python

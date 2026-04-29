@@ -4,7 +4,7 @@
 
 This document outlines features designed to improve the debuggability and observability of the DIBox container. Good diagnostics are essential for making the dependency injection process transparent and easy to troubleshoot.
 
--   See also: [EP: Resolution Modes](./resolution_modes.md), [EP: Entrypoints](./entrypoints.md).
+-   See also: [Strict Mode](./strict_mode.md) (for explicit-binding fail-fast policy), [Implicit Self-Binding](./implicit_self_binding.md) (for permissive fallback limits), [Entrypoints](./entrypoints.md) (for where resolution is triggered).
 
 ---
 
@@ -72,35 +72,22 @@ The following APIs are proposed to allow for proactive, startup-time validation 
 
 ### 3.1. `box.validate()`
 
-Purpose: Eagerly verify the container's configuration without fully instantiating every object. It traverses the dependency graph of registered components and reports any missing bindings or cycles.
+Eagerly verify the container's configuration without fully instantiating every object. Traverses the dependency graph of registered components and reports missing bindings and cycles.
 
-Behavior depends on the resolution mode:
+### 3.2. `box.graph()`
 
-In `DIBox(strict=True)` mode:
--   `validate()` is powerful and comprehensive. Since the set of managed types is explicitly known via `bind()`, the method can check the integrity of the entire graph.
--   All missing bindings and cycles are caught at startup time before any services are constructed.
+Generate a representation of the dependency graph for visualization or analysis. Output could be a simple dictionary or a format compatible with tools like Graphviz.
 
-In `DIBox(strict=False)` mode:
--   The task is harder. The set of potentially resolvable types is infinite, so a full validation is impossible.
--   `validate()` would operate on a best-effort basis, likely by checking only the explicitly bound types and their direct dependencies.
--   Alternatively, the user could provide entry-point types to traverse from: `box.validate(from_entrypoints=[WebApp, Cli])`.
--   This approach is less complete but still provides value: catching misconfiguration in the parts of the graph the user explicitly names.
+### 3.3. Resolution mode impact
 
-### 3.2. `box.graph()` (Idea)
+Resolution mode determines how much of the graph is statically knowable.
 
-Purpose: Generate a representation of the dependency graph for visualization or analysis.
+Strict — the managed type set is fully known from explicit bindings. Both `validate()` and `graph()` can operate comprehensively without any runtime resolution.
 
-Behavior:
--   In `strict=True` mode: Straightforward. The complete graph is known and can be fully visualized.
--   In `strict=False` mode: Same limitations as validate(). Requires a starting point or entry-point list for traversal.
--   Output could be a simple dictionary or a format compatible with tools like Graphviz.
+Semi-strict — explicit roots are known, but transitive expansion can introduce nodes that were never explicitly bound. Whether those nodes can be pre-computed statically (by following type hints from the roots) or are only observable at runtime depends on the introspection surface design (see section 4).
 
----
+Permissive — the set of implicitly resolvable types is open-ended; full static analysis is impossible. Both APIs fall back to entry-point-driven traversal: `box.validate(from_entrypoints=[WebApp, Cli])`. Less exhaustive, but still catches misconfiguration within the named subgraphs.
 
-## 4. The Impact of Resolution Mode on Diagnostics
+## 4. Open Questions
 
-The choice of resolution mode (`strict` vs. `permissive`) directly affects the effectiveness of these diagnostic tools.
-
-With `strict=True`, all diagnostics are powerful and comprehensive. The set of managed types is known and finite, making validation and visualization trivial. This is a primary benefit of using explicit binding: errors and misconfiguration are caught early and reported clearly.
-
-With `strict=False`, the infinite possibility of implicit self-binding makes these tools harder to implement. They must operate on a best-effort basis, validating only what the user explicitly names. While still valuable, they lack the exhaustiveness and certainty of strict mode. This is both a design limitation and a practical argument for using explicit binding in production systems.
+-   Semi-strict introspection surface: should auto-expanded transitive nodes be visible only as derived runtime nodes in graph/diagnostic output, or also materialized as generated bindings in the registry? Materializing them makes `validate()` and `graph()` fully pre-computable for semi-strict, but adds implicit registry state that was never explicitly declared.

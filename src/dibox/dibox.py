@@ -1,7 +1,7 @@
 import inspect
 import logging
 from contextvars import ContextVar, Token
-from typing import Any, Awaitable, Callable, ClassVar, TypeGuard, TypeVar, get_origin, overload
+from typing import Any, Awaitable, Callable, ClassVar, Literal, TypeVar, get_origin, overload
 
 from .binding_box import BindingBox, BindingRecord
 from .dimap import ArgNameQuery, DIMapKey, TypeQuery
@@ -13,6 +13,8 @@ from .resolution_stack import ResolutionStack, format_frame, format_type
 _T = TypeVar("_T")
 _R = TypeVar("_R")
 logger = logging.getLogger(__name__)
+
+ResolutionMode = Literal["permissive", "strict", "semi-strict"]
 
 
 class DIBox(BindingBox):
@@ -28,12 +30,14 @@ class DIBox(BindingBox):
 
     _context_box: ClassVar[ContextVar["DIBox"]] = ContextVar("dibox")
 
-    def __init__(self, strict: bool = False) -> None:
+    def __init__(self, mode: ResolutionMode = "permissive") -> None:
         self.instances = InstanceBox()
         self.injector = Injector(self)
         self.modules: list[BindingBox] = []
         self._context_token: Token["DIBox"] | None = None
-        self._is_strict = strict
+        if mode not in ("permissive", "strict", "semi-strict"):
+            raise ValueError(f"Invalid resolution mode: {mode}")
+        self._resolution_mode = mode
         super().__init__()
 
     @classmethod
@@ -193,23 +197,24 @@ class DIBox(BindingBox):
         requested_type: TypeQuery[_T],
         resolution_stack: ResolutionStack,
     ) -> tuple[BindingRecord, type[_T]]:
-        if not self._is_autowireable(requested_type):
-            reason = "no binding found" if self._is_strict else "requested type is not a concrete class"
-            raise ResolutionError(reason, resolution_stack)
-        binding_record = BindingRecord(
-            async_factory=None, sync_factory=requested_type, signature_info=inspect.signature(requested_type)
-        )
-        return binding_record, requested_type
-
-    def _is_autowireable(self, requested_type: TypeQuery[Any]) -> TypeGuard[type]:
-        if self._is_strict or not isinstance(requested_type, type):
-            return False
+        if not isinstance(requested_type, type):
+            raise ResolutionError("requested type is not a concrete class", resolution_stack)
+        match self._resolution_mode:
+            case "strict":
+                raise ResolutionError("no binding found", resolution_stack)
+            case "semi-strict":
+                if len(resolution_stack) == 1:
+                    raise ResolutionError("no binding found", resolution_stack)
+            case _: ...
         try:
-            _ = inspect.signature(requested_type)
+            signature = inspect.signature(requested_type)
         except (ValueError, TypeError):
             # C extensions, special forms — treat as blacklisted
-            return False
-        return True
+            raise ResolutionError("requested type is not a concrete class", resolution_stack)
+        binding_record = BindingRecord(
+            async_factory=None, sync_factory=requested_type, signature_info=signature
+        )
+        return binding_record, requested_type
 
     async def _provide_dependencies(
         self,

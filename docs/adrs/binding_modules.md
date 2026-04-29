@@ -246,7 +246,7 @@ Warning: module-level cycle detected
   (not via any `BindingBox`). They could be assigned to an implicit `"(app)"` module, or
   excluded from module-graph analysis entirely.
 - **Severity**: should this be an error or a warning? A module cycle doesn't break
-  resolution, so a warning with an opt-in `strict=True` flag seems more appropriate.
+  resolution, so a warning with opt-in strict mode seems more appropriate.
 - **When to run**: `validate()` is the natural place. Adding it to `__aenter__` silently
   on every container entry would be too expensive and too opinionated.
 - **Partial graphs**: if only some modules are named, the cycle analysis covers only

@@ -1,10 +1,10 @@
-# EP: Entrypoints
+# Entrypoints
 
 **Status**: Partially Implemented (declarative); Proposed (imperative)
 
 This document describes the different ways to trigger dependency injection in DIBox.
 
--   See also: [EP: Resolution Modes](./resolution_modes.md) (for the underlying `strict`/`permissive` strategies).
+-   See also: [Strict Mode](./strict_mode.md) (for explicit-binding behavior), [Implicit Self-Binding](./implicit_self_binding.md) (for permissive fallback and guardrails).
 
 ---
 
@@ -52,6 +52,7 @@ async def get_system_config(config: Injected[AppConfig]) -> dict:
 ```
 
 -   When to use: When the container is a known, long-lived singleton and you want to be explicit about the ownership, bypassing the context variable mechanism.
+
 ### 1.3. Advanced: The `Injector` Object
 
 For large applications, it can be useful to centralize injection policy for a specific architectural domain (e.g., `admin_api`, `public_api`). The `Injector` object serves this purpose.
@@ -111,16 +112,16 @@ bound_processor(source_url="s3://...")
 
 The power of imperative entrypoints is also their biggest risk, and their behavior is highly dependent on the container's resolution mode.
 
--   With `DIBox(strict=False)` (the default), `call()` is extremely convenient for quick scripts. It will attempt to construct any dependency, which minimizes boilerplate. However, a missing binding can lead to silent misconfigurations.
+-   In permissive mode (the default), `call()` is extremely convenient for quick scripts. It will attempt to construct any dependency, which minimizes boilerplate. However, a missing binding can lead to silent misconfigurations.
 
--   With `DIBox(strict=True)`, `call()` becomes a safe and predictable tool. It will only inject explicitly bound dependencies, failing immediately if something is missing. This is the recommended approach when using well-defined binding modules, as it guarantees that your function is receiving exactly the dependencies you have configured.
+-   In strict and semi-strict mode, `call()` becomes a safe and predictable tool. It will only inject explicitly bound dependencies, failing immediately if something is missing. This is the recommended approach when using well-defined binding modules, as it guarantees that your function is receiving exactly the dependencies you have configured.
 
-The choice allows you to trade convenience for safety. For a quick, one-off script, the permissive default may be fine. For robust, production-grade orchestration, `strict=True` is strongly recommended.
----
+The choice allows you to trade convenience for safety. For a quick, one-off script, the permissive default may be fine. For robust, production-grade orchestration, strict mode is strongly recommended.
 
 ## 3. Interaction with Resolution Modes
 
-The container's `strict` flag applies uniformly to all entrypoints, ensuring consistent behavior. See [EP: Resolution Modes](./resolution_modes.md) for the full discussion.
+The selected resolution mode applies uniformly to all entrypoints, ensuring consistent behavior. See [Strict Mode](./strict_mode.md) for strict semantics and [Implicit Self-Binding](./implicit_self_binding.md) for permissive-mode guardrails.
 
--   `strict=True`: Only explicitly bound types are resolved. All entrypoints will raise an error for unbound types.
--   `strict=False` (default): Implicit self-binding is used. This is convenient but carries risk, especially for imperative entrypoints. The [Zero-Dependency Guard](./resolution_modes.md#3-mitigation-for-permissive-mode-the-zero-dependency-guard) provides a safety net for the most common failure cases.
+-   Strict mode: Only explicitly bound types are resolved. All entrypoints will raise an error for unbound types.
+-   Semi-strict mode: Resolution roots must be explicitly bound, while unbound transitive concrete dependencies may still be implicitly self-bound.
+-   Permissive mode (default): Implicit self-binding is used. This is convenient but carries risk, especially for imperative entrypoints. The [Zero-Dependency Guard](./implicit_self_binding.md#3-proposed-zero-dependency-guard) provides a safety net for the most common failure cases.

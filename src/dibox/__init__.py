@@ -1,7 +1,7 @@
 from .annotations import Injected
 from .binding_box import BindingBox, BindingRecord
 from .container_protocol import ContainerProtocol
-from .dibox import DIBox
+from .dibox import DIBox, ResolutionMode
 from .inject import inject
 from .injector import InjectDecoratorProtocol, Injector
 from .resolution_error import ResolutionError
@@ -11,6 +11,7 @@ __all__ = [
     "Injected",
     "ContainerProtocol",
     "DIBox",
+    "ResolutionMode",
     "ResolutionError",
     "ResolutionFrame",
     "ResolutionStack",
