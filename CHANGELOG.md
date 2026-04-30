@@ -1,3 +1,10 @@
+## v0.1.11 (2026-04-30)
+### <!-- 0 -->🚀 Features & Enhancements
+- Semi-strict resolution mode
+
+### <!-- 7 -->🛠️ Under the hood
+- Fix wrong release notes during pipeline runs
+
 ## v0.1.10 (2026-04-26)
 ### <!-- 0 -->🚀 Features & Enhancements
 - Show resolution stack in errors and logs

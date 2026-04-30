@@ -114,7 +114,7 @@ toml = [
 
 [[package]]
 name = "dibox"
-version = "0.1.10"
+version = "0.1.11"
 source = { virtual = "." }
 
 [package.dev-dependencies]
