@@ -4,7 +4,7 @@ from contextvars import ContextVar, Token
 from typing import Any, Awaitable, Callable, ClassVar, Literal, TypeVar, get_origin, overload
 
 from .binding_box import BindingBox, BindingRecord
-from .dimap import ArgNameQuery, DIMapKey, TypeQuery
+from .dimap import ANY_ARG, ANY_TYPE, DIMapKey, MatchAny, TypeQuery, WildArgName, WildType
 from .injector import Injector
 from .instance_box import InstanceBox
 from .resolution_error import ResolutionError
@@ -69,7 +69,7 @@ class DIBox(BindingBox):
         self.modules.append(binding_box)
 
     def find_binding(
-        self, requested_type: TypeQuery[Any] | None, name: str | None
+        self, requested_type: TypeQuery[Any], name: WildArgName
     ) -> tuple[BindingRecord | None, DIMapKey[Any]]:
         binding_record, key = super().find_binding(requested_type, name)
         if binding_record is not None:
@@ -78,7 +78,7 @@ class DIBox(BindingBox):
             binding_record, key = module.find_binding(requested_type, name)
             if binding_record is not None:
                 return binding_record, key
-        return None, (None, None)  # no binding found
+        return None, (ANY_TYPE, ANY_ARG)  # no binding found
 
     def inject(self, func: Callable[..., _R]) -> Callable[..., _R]:
         """Decorates a function so missing injectable arguments come from this container.
@@ -101,7 +101,12 @@ class DIBox(BindingBox):
         # since we have access to all bindings.
         raise NotImplementedError("call() method is not implemented yet.")
 
-    async def provide(self, requested_type: TypeQuery[_T], name: ArgNameQuery = None) -> _T:
+    @overload
+    async def provide(self, requested_type: MatchAny, name: str) -> Any: ...
+    @overload
+    async def provide(self, requested_type: TypeQuery[_T], name: WildArgName = ANY_ARG) -> _T: ...
+
+    async def provide(self, requested_type: TypeQuery[_T], name: WildArgName = ANY_ARG) -> _T:
         """Provides an instance of the requested type, with optional name-based binding.
 
         This is the primary method for dependency resolution. DIBox matches dependencies
@@ -111,8 +116,6 @@ class DIBox(BindingBox):
         If a matching instance already exists, it will be returned. Otherwise, DIBox will
         create a new instance, automatically resolving and injecting all its dependencies
         based on constructor type hints. Supports async factories and lifecycle management.
-
-        TODO: _T is unknown for None type query -> We need overload with Any return type for that case.
 
         Args:
             requested_type: The type of the instance to provide.
@@ -125,7 +128,7 @@ class DIBox(BindingBox):
         """
         return await self._get_or_create_instance(requested_type, name, resolution_stack=[])
 
-    def get(self, requested_type: TypeQuery[_T], name: ArgNameQuery = None) -> _T:
+    def get(self, requested_type: TypeQuery[_T], name: WildArgName = ANY_ARG) -> _T:
         """Retrieves an existing instance using type and optional name matching.
 
         This synchronous method looks up already-created instances in the container.
@@ -156,7 +159,7 @@ class DIBox(BindingBox):
     async def _get_or_create_instance(
         self,
         requested_type: TypeQuery[_T],
-        name: ArgNameQuery,
+        name: WildArgName,
         resolution_stack: ResolutionStack,
     ) -> _T:
         existing_instance = self.instances.get_instance(requested_type, name)
@@ -168,21 +171,17 @@ class DIBox(BindingBox):
     async def _create_instance(
         self,
         requested_type: TypeQuery[_T],
-        name: ArgNameQuery,
+        name: WildArgName,
         resolution_stack: ResolutionStack,
     ) -> _T:
         resolution_stack.append((requested_type, name))
+        _log_instance_creation(requested_type, name, resolution_stack)
         try:
             binding_record, (matched_type, matched_arg) = self.find_binding(requested_type, name)
             if binding_record is None:
                 # implicit self-binding for concrete classes in non-strict mode
                 binding_record, matched_type = self._make_impicit_binding_record(requested_type, resolution_stack)
-                matched_arg = None
-            if logger.isEnabledFor(logging.DEBUG):
-                parent = resolution_stack[-2] if len(resolution_stack) > 1 else None
-                parent_part = f" (as dependency of {format_type(parent[0])})" if parent is not None else ""
-                requested = format_frame(requested_type, name)
-                logger.debug("Creating instance %s %s", requested, parent_part)
+                matched_arg = ANY_ARG
             # the first argument can be used as a type of the dependency to be created
             # That's likely needs to be done only for predicate matching, but currently we can't distinguish them
             args_override = self._bind_factory_type_argument(matched_type, binding_record)
@@ -244,7 +243,7 @@ class DIBox(BindingBox):
         return res
 
     @staticmethod
-    def _bind_factory_type_argument(type_to_create: type[Any] | None, binding_record: BindingRecord) -> dict[str, Any]:
+    def _bind_factory_type_argument(type_to_create: WildType[Any], binding_record: BindingRecord) -> dict[str, Any]:
         # the first argument can be used as a type of the dependency to be created
         res: dict[str, Any] = {}
         signature = binding_record.signature_info
@@ -273,3 +272,14 @@ class DIBox(BindingBox):
             DIBox._context_box.reset(self._context_token)
             self._context_token = None
         await self.instances.close(exc_details)
+
+def _log_instance_creation(
+    requested_type: TypeQuery[_T],
+    name: WildArgName,
+    resolution_stack: ResolutionStack,
+) -> None:
+    if logger.isEnabledFor(logging.DEBUG):
+        parent = resolution_stack[-2] if len(resolution_stack) > 1 else None
+        parent_part = f" (as dependency of {format_type(parent[0])})" if parent is not None else ""
+        requested = format_frame(requested_type, name)
+        logger.debug("Creating instance %s %s", requested, parent_part)

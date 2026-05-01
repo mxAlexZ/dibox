@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from dibox.binding_box import BindingBox
+from dibox import ANY_ARG, ANY_TYPE, BindingBox, TypeQuery, WildArgName, WildType
 
 
 class _Service:
@@ -40,24 +40,24 @@ _service_instance = _ServiceImpl("instance")
 
 
 class BindingBoxTest:
-    def _get_valid_bind_overload_case(self, box: BindingBox, test_id: str) -> tuple[type | None, str | None, str]:
+    def _get_valid_bind_overload_case(self, box: BindingBox, test_id: str) -> tuple[TypeQuery[Any], WildArgName, str]:
         # requested_type, request_arg, expected_tag
         match test_id:
             case "type":
                 box.bind(_ServiceImpl)
-                return _ServiceImpl, None, "impl"
+                return _ServiceImpl, ANY_ARG, "impl"
             case "type, impl":
                 box.bind(_Service, _ServiceImpl)
-                return _Service, None, "impl"
+                return _Service, ANY_ARG, "impl"
             case "type, sync_factory":
                 box.bind(_Service, _sync_factory)
-                return _Service, None, "sync_f"
+                return _Service, ANY_ARG, "sync_f"
             case "type, async_factory":
                 box.bind(_Service, _async_factory)
-                return _Service, None, "async_f"
+                return _Service, ANY_ARG, "async_f"
             case "type, instance":
                 box.bind(_Service, _service_instance)
-                return _Service, None, "instance"
+                return _Service, ANY_ARG, "instance"
             case "type, arg, impl":
                 box.bind(_Service, "arg", _ServiceImpl)
                 return _Service, "arg", "impl"
@@ -72,13 +72,13 @@ class BindingBoxTest:
                 return _Service, "arg", "instance"
             case "type, target=":
                 box.bind(_Service, target=_ServiceImpl)
-                return _Service, None, "impl"
+                return _Service, ANY_ARG, "impl"
             case "type, factory=":
                 box.bind(_Service, factory=_sync_factory)
-                return _Service, None, "sync_f"
+                return _Service, ANY_ARG, "sync_f"
             case "type, instance=":
                 box.bind(_Service, instance=_service_instance)
-                return _Service, None, "instance"
+                return _Service, ANY_ARG, "instance"
             case "type, arg, target=":
                 box.bind(_Service, "arg", target=_ServiceImpl)
                 return _Service, "arg", "impl"
@@ -96,7 +96,7 @@ class BindingBoxTest:
                 return _Service, "arg", "impl"
             case "name=, target=":
                 box.bind(name="arg", target=_ServiceImpl)
-                return None, "arg", "impl"
+                return ANY_TYPE, "arg", "impl"
             case "predicate, factory":
                 box.bind(_is_foo, lambda: _Foo("foo"))
                 return _Foo, "foo_arg", "foo"
@@ -218,20 +218,20 @@ class BindingBoxTest:
     @pytest.mark.parametrize(
         ("requested_type", "request_arg", "expected_matched_type", "expected_matched_arg", "expected_tag"),
         [
-            (_Service, "rand_arg", _Service, None, "impl"),
+            (_Service, "rand_arg", _Service, ANY_ARG, "impl"),
             (_Service, "impl2_arg", _Service, "impl2_arg", "impl2"),
-            (_Foo, "foo_arg", _Foo, None, "_Foo"),
-            (_Foo2, "foo_arg", _Foo2, None, "_Foo2"),
-            (_Service | str, "rand_arg", _Service, None, "impl"),
-            (Union[_Service, str], "rand_arg", _Service, None, "impl"),
+            (_Foo, "foo_arg", _Foo, ANY_ARG, "_Foo"),
+            (_Foo2, "foo_arg", _Foo2, ANY_ARG, "_Foo2"),
+            (_Service | str, "rand_arg", _Service, ANY_ARG, "impl"),
+            (Union[_Service, str], "rand_arg", _Service, ANY_ARG, "impl"),
         ],
     )
     def test_find_binding_returns_correct_binding_record_and_matching_data(
         self,
-        requested_type: type[Any],
-        request_arg: str | None,
-        expected_matched_type: type | None,
-        expected_matched_arg: str | None,
+        requested_type: TypeQuery[Any],
+        request_arg: WildArgName,
+        expected_matched_type: WildType[Any],
+        expected_matched_arg: WildArgName,
         expected_tag: str,
     ):
         def _foo_factory(t: type[Any]) -> _Foo:
@@ -273,7 +273,7 @@ class BindingBoxTest:
     ):
         box = BindingBox()
         box.bind(*bind_args, **bind_kwargs)
-        binding, _ = box.find_binding(_Service, None)
+        binding, _ = box.find_binding(_Service, ANY_ARG)
         assert binding is not None
 
         tag = binding.call_sync().tag
@@ -283,7 +283,7 @@ class BindingBoxTest:
     def test_async_binding_raises_when_called_synchronously(self):
         box = BindingBox()
         box.bind(_Service, _async_factory)
-        binding, _ = box.find_binding(_Service, None)
+        binding, _ = box.find_binding(_Service, ANY_ARG)
         assert binding is not None
 
         with pytest.raises(RuntimeError):
@@ -299,7 +299,7 @@ class BindingBoxTest:
 
         box = BindingBox()
         box.bind(_Service, async_gen_factory)
-        binding, _ = box.find_binding(_Service, None)
+        binding, _ = box.find_binding(_Service, ANY_ARG)
         assert binding is not None
 
         async with await binding.call_async() as service:
@@ -318,7 +318,7 @@ class BindingBoxTest:
 
         box = BindingBox()
         box.bind(_Service, gen_factory)
-        binding, _ = box.find_binding(_Service, None)
+        binding, _ = box.find_binding(_Service, ANY_ARG)
         assert binding is not None
 
         with binding.call_sync() as service:
@@ -330,9 +330,9 @@ class BindingBoxTest:
     def test_bind_many_registers_all_types(self):
         box = BindingBox()
         box.bind_many(_ServiceImpl, _Foo2)
-        t1 = box.find_binding(_ServiceImpl, None)[0]
+        t1 = box.find_binding(_ServiceImpl, ANY_ARG)[0]
         assert t1 is not None
         assert isinstance(t1.call_sync(), _ServiceImpl)
-        t2 = box.find_binding(_Foo2, None)[0]
+        t2 = box.find_binding(_Foo2, ANY_ARG)[0]
         assert t2 is not None
         assert isinstance(t2.call_sync(), _Foo2)

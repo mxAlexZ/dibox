@@ -2,16 +2,17 @@ from typing import Any, Union
 
 import pytest
 
-from dibox.dimap import DIMap, MatchResult
+from dibox.dimap import ANY_ARG, ANY_TYPE, DIMap, MatchResult, TypeQuery, WildArgName
 
 
-class Bar: ...
+class Bar:
+    ...
 
+class Foo:
+    ...
 
-class Foo: ...
-
-
-class Rando: ...
+class Rando:
+    ...
 
 
 class DIMapTest:
@@ -19,19 +20,19 @@ class DIMapTest:
         ("type", "arg", "expected"),
         [
             (Bar, "arg", ("bar/arg", (Bar, "arg"))),
-            (Bar, "rando", ("bar/none", (Bar, None))),
-            (Foo, "rando", ("foo/none", (Foo, None))),
-            (Foo | Rando, "rando", ("foo/none", (Foo, None))),
-            (Union[Bar, Rando], "rando", ("bar/none", (Bar, None))),
-            (Rando, "arg", ("none/arg", (None, "arg"))),
-            (Rando, "rando", None),
+            (Bar, "rando", ("bar/none", (Bar, ANY_ARG))),
+            (Foo, "rando", ("foo/none", (Foo, ANY_ARG))),
+            (Rando | Foo, "rando", ("foo/none", (Foo, ANY_ARG))),
+            (Union[Rando, Bar], "rando", ("bar/none", (Bar, ANY_ARG))),
+            (Rando, "arg", ("none/arg", (ANY_TYPE, "arg"))),
+            (Rando, "rando", (None, (ANY_TYPE, ANY_ARG))),
         ],
     )
-    def test_find_match(self, type: type[Any] | None, arg: str | None, expected: MatchResult[str, Any]):
+    def test_find_match(self, type: TypeQuery[Any], arg: WildArgName, expected: MatchResult[str, Any]):
         m = DIMap[str]()
-        m[(Bar, None)] = "bar/none"
-        m[(None, "arg")] = "none/arg"
+        m[(Bar, ANY_ARG)] = "bar/none"
+        m[(ANY_TYPE, "arg")] = "none/arg"
         m[(Bar, "arg")] = "bar/arg"
-        m[(Foo, None)] = "foo/none"
+        m[(Foo, ANY_ARG)] = "foo/none"
 
         assert m.find_match(type, arg) == expected

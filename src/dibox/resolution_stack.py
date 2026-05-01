@@ -1,22 +1,18 @@
 from typing import Any
 
-from .dimap import ArgNameQuery, TypeQuery
+from .dimap import ANY_ARG, TypeQuery, WildArgName
 
-ResolutionFrame = tuple[TypeQuery[Any], ArgNameQuery]
+ResolutionFrame = tuple[TypeQuery[Any], WildArgName]
 ResolutionStack = list[ResolutionFrame]
 
 
 def format_type(type_query: TypeQuery[Any]) -> str:
-    return (
-        "None"
-        if type_query is type(None)
-        else getattr(type_query, "__qualname__", None) or str(type_query)
-    )
+    return getattr(type_query, "__qualname__", None) or str(type_query)
 
 
-def format_frame(type_query: TypeQuery[Any] | None, name: ArgNameQuery) -> str:
+def format_frame(type_query: TypeQuery[Any], name: WildArgName) -> str:
     return (
         format_type(type_query)
-        if name is None
+        if name is ANY_ARG
         else f"{name}: {format_type(type_query)}"
     )

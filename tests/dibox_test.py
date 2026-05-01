@@ -9,6 +9,7 @@ from attrs import define
 
 from dibox import BindingBox, DIBox, Injected, ResolutionError, ResolutionMode
 from dibox.binding_box import FactoryFunc
+from dibox.dimap import ANY_ARG, ANY_TYPE, WildArgName, WildType
 
 
 @define
@@ -54,13 +55,17 @@ class DIBoxProvideTest:
 
     @pytest.mark.parametrize(
         ("type_request", "arg_name"),
-        [(Bar, None), (Bar, "arg"), (Bar | Foo, None)],
+        [
+            (Bar, ANY_ARG),
+            (Bar, "arg"),
+            (Bar | Foo, ANY_ARG),
+        ],
     )
     async def test_provided_instance_is_reused_on_subsequent_provide(
         self,
         resolution_mode: ResolutionMode,
-        type_request: type[Any],
-        arg_name: str | None,
+        type_request: WildType[Any],
+        arg_name: WildArgName,
     ):
         box = DIBox(mode=resolution_mode)
         box.bind(Bar, factory=lambda: Bar(s="test"))
@@ -93,12 +98,12 @@ class DIBoxProvideTest:
     @pytest.mark.parametrize(
         ("requested_type", "name"),
         [
-            ("I am a string, not a type", None),
+            ("I am a string, not a type", ANY_ARG),
             (Foo | Bar, "arg"),
-            (None, "arg"),
+            (ANY_TYPE, "arg"),
         ],
     )
-    async def test_non_concrete_type_raises_value_error(self, requested_type: Any, name: str | None):
+    async def test_non_concrete_type_raises_value_error(self, requested_type: Any, name: WildArgName):
         box = DIBox()
         with pytest.raises(ResolutionError, match="not a concrete class"):
             await box.provide(requested_type, name)
@@ -137,7 +142,7 @@ class DIBoxProvideTest:
         message = str(error)
         assert re.search(r"(value: int).*(a: .*A).*(B)", message, re.DOTALL)
         assert "Foo" not in message
-        assert error.resolution_stack == [(B, None), (A, "a"), (int, "value")]
+        assert error.resolution_stack == [(B, ANY_ARG), (A, "a"), (int, "value")]
 
     async def test_log_message_includes_matched_type_and_arg(self):
         box = DIBox()

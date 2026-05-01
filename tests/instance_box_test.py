@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from dibox.binding_box import BindingRecord, FactoryFunc
+from dibox.dimap import ANY_ARG
 from dibox.instance_box import InstanceBox
 
 
@@ -20,7 +21,7 @@ class InstanceBoxTest:
         def factory():
             return instance
         binding = BindingRecord(None, factory, inspect.signature(factory))
-        await box.create_instance(Bar, None, binding)
+        await box.create_instance(Bar, ANY_ARG, binding)
         assert box.get_instance(Bar) is instance
 
     def test_get_returns_none_for_unknown_type(self):
@@ -40,7 +41,7 @@ class InstanceBoxTest:
         factory = BadStart
         binding = BindingRecord(None, factory, inspect.signature(factory))
         with pytest.raises(RuntimeError, match="startup failed"):
-            await box.create_instance(BadStart, None, binding)
+            await box.create_instance(BadStart, ANY_ARG, binding)
         await box.close()
         close_mock.assert_not_called()
         assert box.get_instance(BadStart) is None
@@ -115,7 +116,7 @@ class InstanceBoxTest:
         exit_event = Mock()
         box = InstanceBox()
         binding_record = self._make_lifecycle_manager_binding(lifecycle_manager_style, enter_event, exit_event)
-        await box.create_instance(Bar, None, binding_record)
+        await box.create_instance(Bar, ANY_ARG, binding_record)
         enter_event.assert_called_once()
         exit_event.assert_not_called()
         await box.close()

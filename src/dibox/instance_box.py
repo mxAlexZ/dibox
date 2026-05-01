@@ -3,7 +3,7 @@ from contextlib import AsyncExitStack
 from typing import Any, Callable, TypeVar, cast
 
 from .binding_box import BindingRecord
-from .dimap import ArgNameQuery, DIMap, TypeQuery
+from .dimap import ANY_ARG, DIMap, TypeQuery, WildArgName, WildType
 
 _T = TypeVar('_T')
 
@@ -18,7 +18,7 @@ class InstanceBox:
     start_methods = ["start"]
     close_methods = ["aclose", "close"]
 
-    def __init__(self) -> None  :
+    def __init__(self) -> None:
         self._items = DIMap[Any]()
         self._exit_stack = AsyncExitStack()
 
@@ -26,15 +26,15 @@ class InstanceBox:
     def get_instance(
         self,
         requested_type: TypeQuery[_T],
-        name: ArgNameQuery = None
+        name: WildArgName = ANY_ARG
     ) -> _T | None:
-        match = self._items.find_match(requested_type, name)
-        return match[0] if match is not None else None
+        matched_instance, _ = self._items.find_match(requested_type, name)
+        return matched_instance
 
     async def create_instance(
         self,
-        requested_type: type[_T] | None,
-        name: ArgNameQuery,
+        requested_type: WildType[_T],
+        name: WildArgName,
         binding_record: BindingRecord,
         **args: Any
     ) -> _T:
