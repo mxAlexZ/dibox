@@ -36,7 +36,33 @@ async with DIBox(parent=app_box) as request_box:
     config = await request_box.provide(AppConfig)     # resolved from app_box
 # request_box closes here - RequestContext is torn down, app-level instances are untouched.
 ```
-Note: we can update the example with binding modules (BindingBox) once we have that API in place.
+### Binding modules inside scopes
+
+Binding modules compose naturally with the container-nesting proposal. A `BindingBox`
+defines what can be resolved inside a scope; the nested `DIBox` defines when that scope
+starts and ends. These concerns should stay separate.
+
+```python
+# pipeline/gpu_stage.py — reusable recipe for any GPU-accelerated stage
+gpu_stage_bindings = BindingBox()
+gpu_stage_bindings.bind(GPUContext)
+gpu_stage_bindings.bind(StageBuffer)
+
+enhance_bindings = BindingBox()
+enhance_bindings.bind(Enhancer)
+```
+
+```python
+async with DIBox(parent=run_box) as stage_box:
+    stage_box.add_bindings(gpu_stage_bindings)
+    stage_box.add_bindings(enhance_bindings)
+    stage_box.bind(StageContext, instance=StageContext("enhance", tmp_dir))
+    enhancer = await stage_box.provide(Enhancer)
+```
+
+The module is reusable binding configuration. It does not own the lifetime boundary and
+does not need to know whether it is added to an app, request, job, or pipeline-stage
+container.
 
 Note: We currently have an internal concept of "instance box" which is where resolved instances live. In the nesting design, we can either keep this 1-1 relationship (each container has one instance box) or allow multiple instance boxes per container (e.g. one per scope). Alteratively to the example above, parent and child relationship can be implemented between instance boxes instead of diboxes; the latter would manage the bindings and the scopes. We need to explore this further.
 
@@ -44,17 +70,20 @@ Note: We currently have an internal concept of "instance box" which is where res
 
 Child asks itself first, then delegates to parent. Once an instance is created, it lives in the container that created it.
 
-### Override semantics
+### Shadowing semantics
 
-A child can shadow a parent binding without affecting the parent or sibling containers. This is useful for testing and for request-specific configuration:
+A child can shadow a parent binding without affecting the parent or sibling containers.
+This is useful for scope-specific configuration, such as tenant or request context. It
+should not be the default testing strategy: tests should compose isolated test modules
+with no fallback to non-test services.
 
 ```python
-app_box.bind(PaymentGateway, StripeGateway)
+app_box.bind(CachePolicy, instance=CachePolicy(ttl=300))
 
-async with DIBox(parent=app_box) as test_box:
-    test_box.bind(PaymentGateway, MockGateway)
-    gw = await test_box.provide(PaymentGateway)   # MockGateway
-    # app_box still resolves StripeGateway
+async with DIBox(parent=app_box) as request_box:
+    request_box.bind(CachePolicy, instance=CachePolicy(ttl=0))
+    policy = await request_box.provide(CachePolicy)   # request-specific policy
+    # app_box still resolves the app-level policy
 ```
 
 ### Instance ownership

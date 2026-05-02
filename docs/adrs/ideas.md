@@ -2,16 +2,23 @@
 
 ## Active roadmap
 
-**Dependency graph introspection** — `validate()` and `graph()` are specced in [EP: Diagnostics](./diagnostics.md). Low implementation cost, high DX value.
+**Dependency graph introspection** — `validate()` and `graph()` are specced in [EP: Diagnostics](./diagnostics.md). Low implementation cost, high DX value. Named binding modules would make the output more useful.
 
-**Testing utilities**
+**Test module composition helpers**
 
 ```python
-async with app_box.override({PaymentGateway: MockGateway}) as test_box:
-    ...
+test_bindings = make_test_bindings(
+    payment_gateway=FakeGateway,
+    invoice_storage=InMemoryInvoiceStorage,
+)
+
+async with DIBox() as box:
+    box.add_bindings(test_bindings)
 ```
 
-A thin wrapper over nesting, but makes the intent explicit. Could also support `app_box.override_factory(...)` for partial mocks.
+Tests should compose isolated binding modules. Helper APIs can reduce fixture boilerplate,
+but they must preserve graph isolation rather than encourage fallback to non-test
+services.
 
 **Startup initialization mode**
 
@@ -31,6 +38,16 @@ Note on terminology: this is distinct from *implicit self-binding* (sometimes ca
 ## Deferred
 
 Ideas that are plausible but waiting for a clearer use-case before design work begins.
+
+**Named binding modules**
+
+```python
+bindings = BindingBox(name="billing")
+```
+
+Optional module identity would improve error messages, debug logging, `validate()`, and
+`graph()` output. Explicit names should be the base feature; automatic names inferred
+from the defining Python module can be considered later as convenience syntax.
 
 **Resolver with call-time arguments**
 

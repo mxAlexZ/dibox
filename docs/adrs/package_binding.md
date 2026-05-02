@@ -1,6 +1,10 @@
 # Package-aware auto-binding
 
-See also: [binding_modules.md](binding_modules.md), [greedy_resolution.md](greedy_resolution.md)
+Related ADRs:
+
+- [binding_modules.md](binding_modules.md): `PackageBindingBox` would be a convenience for constructing a named `BindingBox` module.
+- [zero_dependency_guard.md](zero_dependency_guard.md): package scanning needs the same leaf-node safety filter as implicit self-binding.
+- [diagnostics.md](diagnostics.md): package ownership metadata feeds module-aware graph and cycle diagnostics.
 
 ## The boilerplate problem
 
@@ -43,7 +47,7 @@ Not everything in a package is a service. The scan applies filters in order:
   stays out; `stripe.__module__` is `"stripe.client"`, not `"billing"`).
 - **Dataclass exclusion**: `dataclasses.is_dataclass(cls)` — dataclasses are DTOs and
   value objects, not services. Excluded by default with an opt-in to override.
-- **Zero-dep guard** (from `greedy_resolution.md`): skip any type where
+- **Zero-dep guard** (from `zero_dependency_guard.md`): skip any type where
   `inspect.signature` shows no required parameters. These are value types —
   `Path()`, config objects with all-default fields. The same guard that protects
   `provide()` from silently constructing primitives protects package scanning from
@@ -118,5 +122,5 @@ that the dataclass check closes.
 `PackageBindingBox` provides the most natural `name=` value and the tightest
 type-to-module mapping possible: `cls.__module__` directly encodes package membership
 with no heuristics. This makes it the ideal input for the module-level cycle detection
-described in `binding_modules.md`: no ambiguity about which module a type belongs to,
+described in `diagnostics.md`: no ambiguity about which module a type belongs to,
 no manual attribution needed.

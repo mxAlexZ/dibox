@@ -120,8 +120,8 @@ The choice allows you to trade convenience for safety. For a quick, one-off scri
 
 ## 3. Interaction with Resolution Modes
 
-The selected resolution mode applies uniformly to all entrypoints, ensuring consistent behavior. See [Strict Mode](./strict_mode.md) for strict semantics and [Implicit Self-Binding](./implicit_self_binding.md) for permissive-mode guardrails.
+The selected resolution mode applies uniformly to all entrypoints, ensuring consistent behavior. See [Strict Mode](./strict_mode.md) for strict semantics, [Implicit Self-Binding](./implicit_self_binding.md) for permissive fallback, and [Zero-Dependency Guard](./zero_dependency_guard.md) for leaf-node guardrails.
 
 -   Strict mode: Only explicitly bound types are resolved. All entrypoints will raise an error for unbound types.
 -   Semi-strict mode: Resolution roots must be explicitly bound, while unbound transitive concrete dependencies may still be implicitly self-bound.
--   Permissive mode (default): Implicit self-binding is used. This is convenient but carries risk, especially for imperative entrypoints. The [Zero-Dependency Guard](./implicit_self_binding.md#3-proposed-zero-dependency-guard) provides a safety net for the most common failure cases.
+-   Permissive mode (default): Implicit self-binding is used. This is convenient but carries risk, especially for imperative entrypoints. The zero-dependency guard provides a safety net for the most common leaf-node failure cases.

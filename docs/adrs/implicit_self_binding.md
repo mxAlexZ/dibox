@@ -1,63 +1,68 @@
-# Implicit Self-Binding, Permissive Mode and Zero-Dependency Guard
+# Implicit Self-Binding and Permissive Defaults
 
-Status: Partially implemented. The zero-dependency guard is proposed and not implemented.
+Status: implemented
 
-This ADR is scoped to permissive resolution behavior. Strict mode policy and API are tracked in [Strict Mode](./strict_mode.md).
+This ADR defines implicit self-binding as a resolution mechanism. It also documents full permissive mode because DIBox does not yet have a separate permissive-mode ADR.
 
-Related ADRs:
-- [Strict Mode](./strict_mode.md): defines explicit binding semantics, the safety baseline this ADR contrasts with.
-- [Entrypoints](./entrypoints.md): explains how permissive fallback affects `provide()`, `call()`, and decorator-driven resolution.
-- [Diagnostics and Introspection](./diagnostics.md): explains why permissive fallback weakens exhaustive validation and graph guarantees.
-- [Semi-Strict Resolution](./semi_strict_mode.md): proposes explicit roots with implicit transitive expansion.
+Related decisions:
+- [Zero-Dependency Guard](./zero_dependency_guard.md): safety filter for zero-required-argument leaf nodes, including primitives and all-default constructors.
+- [Semi-Strict Resolution](./semi_strict_mode.md): explicit roots with implicit self-binding for graph internals when permissive roots are too open.
+- [Strict Mode](./strict_mode.md): fully explicit ownership boundary for production and test safety.
+- [Diagnostics and Introspection](./diagnostics.md): why open-ended implicit graph expansion limits validation and graph guarantees.
+- [Entrypoints](./entrypoints.md): how resolution policy affects `provide()`, `call()`, and decorator-driven injection.
 
-## 1. Problem
+## 1. Motivation: zero-config concrete service graphs
 
-Implicit self-binding is useful for fast onboarding, but it can hide missing configuration. When an unbound dependency is a zero-arg or all-default constructor, permissive resolution can silently instantiate the wrong object and defer failure to a distant call site.
+Dependency graphs are dominated by concrete service classes whose constructors already describe the dependency structure. If `UserService` requires `UserRepo` and `Logger`, there is usually no extra decision to record for those concrete intermediate types. Requiring `bind(UserService)`, `bind(UserRepo)`, and every similar class turns type hints into duplicated registration boilerplate.
 
-The ADR goal is to keep permissive DX while reducing the most error-prone silent-success cases.
+Implicit self-binding exists to remove that noise inside the graph. Once a concrete class is part of resolution, DIBox can use its constructor as the factory and follow required annotated parameters recursively.
 
-## 2. Current behavior: implicit self-binding
+Full permissive mode extends the same convenience to requested roots: a user can ask for a concrete root without binding it first. This is the easiest onboarding path for scripts, prototypes, small apps, and internal services where setup friction is the largest adoption cost.
 
-Two mechanisms are often conflated under "auto-wiring":
+## 2. Terminology
 
-- Type-hint wiring: the container reads constructor annotations and resolves typed parameters. This behavior is always on.
-- Implicit self-binding: when no explicit `bind()` entry exists for a concrete type, the container treats that type as its own factory.
+Type-hint wiring means inspecting constructor annotations and resolving required parameters from the container.
 
-In permissive mode (the default), implicit self-binding is enabled:
+Implicit self-binding means that when no explicit binding exists for a concrete class, DIBox treats that class as its own factory.
 
-- `await box.provide(MyService)` can succeed without `box.bind(MyService)`.
-- This keeps setup friction low for prototypes, scripts, and small internal services.
+Resolution mode decides where implicit self-binding is allowed: permissive mode allows it for roots and transitive dependencies; semi-strict mode allows it only below explicit roots; strict mode disables it.
 
-The downside is policy ambiguity: the container may construct types that were never intended to be container-managed.
+"Auto-wiring" is an overloaded label for both ideas, so this ADR uses the precise terms above.
 
-## 3. Proposed: Zero-Dependency Guard
+## 3. Resolution-mode contract
 
-To reduce silent misconfiguration in permissive mode, add a guard that blocks implicit self-binding for types with zero required constructor parameters.
+Across modes, explicit bindings win over implicit behavior. When implicit self-binding is allowed for a concrete class:
 
-Rule:
-- A type is not eligible for implicit self-binding when its constructor has no required parameters.
+- DIBox constructs the class directly if no binding exists.
+- Required annotated constructor parameters are resolved recursively.
+- Missing annotations, non-concrete requests, and unsupported special forms fail resolution.
+- Created instances are container-managed after construction.
 
-Practical impact:
-- Blocks value-like leaf types (`str`, `int`, `list`, `dict`, `Path`) from silent construction.
-- Blocks zero-arg and all-default service constructors from being silently materialized.
-- Preserves permissive behavior for concrete types with real required dependencies.
+Mode boundaries:
 
-Example failure shift:
-- Missing binding for `AppConfig(db_url: str)` no longer silently succeeds through `str("")` construction. Resolution fails at `str` as a blocked leaf, producing a visible misconfiguration signal.
+- Permissive mode: implicit self-binding applies to requested roots and transitive dependencies. This makes `await box.provide(MyService)` valid without `box.bind(MyService)` when `MyService` is a concrete class with resolvable annotated dependencies.
+- Semi-strict mode: requested roots must be explicitly bound, but transitive concrete dependencies may still self-bind. This preserves the main ergonomics benefit for graph internals while making ownership explicit at the boundary.
+- Strict mode: implicit self-binding is disabled. Every resolvable type must be explicitly bound.
 
-All-default constructors (`RateLimiter(rps=100, burst=200)`) are intentionally blocked from implicit creation. Requiring `box.bind(RateLimiter)` in that case is a low-cost intent declaration because the container contributes little construction value for zero-required-arg types.
+## 4. Why permissive is the default, and when semi-strict fits
 
-## 4. Trade-offs and boundaries
+Full permissive mode follows progressive disclosure of complexity: useful first, stricter later. It lets DIBox act as a wiring tool before it becomes a policy tool.
 
-Benefits:
-- Preserves zero-config ergonomics for common concrete service graphs.
-- Eliminates a high-frequency silent-failure class in permissive mode.
+Users should bind explicitly where there is a real decision: configuration values, secrets, interface implementations, lifecycle-managed resources, test modules, or named variants. For ordinary concrete classes whose constructor signature fully determines their dependencies, implicit self-binding records no additional intent.
 
-Limitations:
-- This is a guardrail, not a full strictness guarantee.
-- Types with required parameters can still be implicitly self-bound.
-- Full "only explicitly managed types resolve" semantics remain the role of [Strict Mode](./strict_mode.md).
+Semi-strict mode is the main mitigation when full permissive roots become too open. It keeps the valuable part of implicit self-binding — automatic wiring for concrete graph internals — while requiring explicit root declarations for ownership, tests, and production review.
 
-## 5. Summary
+## 5. Boundaries and risks
 
-Permissive mode remains the onboarding-optimized default. The zero-dependency guard is the minimum safety filter needed to keep that default viable without pretending it offers strict-mode guarantees.
+Full permissive mode keeps the graph open-ended. That has costs:
+
+- Container ownership is less explicit; an unbound concrete class may become managed because it was requested or appeared transitively.
+- Adding a constructor dependency can silently expand the graph.
+- Missing configuration can be hidden when a leaf type is constructable with defaults.
+- Exhaustive validation and graph introspection are weaker because the managed set is not closed up front.
+
+The zero-dependency guard addresses the most error-prone leaf-node case. Semi-strict mode reduces open-root risk while preserving implicit transitive wiring. Strict mode disables implicit self-binding entirely.
+
+## 6. Summary
+
+Implicit self-binding is the mechanism that lets concrete service graphs be wired from type hints without duplicating the graph in binding declarations. Full permissive mode applies it at roots for easy onboarding; semi-strict mode applies it inside explicit roots for safer growth. Its purpose is not to avoid explicit bindings everywhere, but to reserve them for places where user intent cannot be inferred from the constructor.

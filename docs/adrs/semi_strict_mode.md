@@ -8,7 +8,8 @@ and fully explicit strict mode.
 Related ADRs:
 
 - [Strict Mode](./strict_mode.md): defines the explicit-binding baseline that semi-strict keeps at the root boundary.
-- [Implicit Self-Binding](./implicit_self_binding.md): defines permissive behavior and the zero-dependency guard to reduce misconfiguration risk.
+- [Implicit Self-Binding](./implicit_self_binding.md): defines the permissive transitive expansion behavior semi-strict reuses below explicit roots.
+- [Zero-Dependency Guard](./zero_dependency_guard.md): proposed safety filter for leaf-node implicit construction during transitive expansion.
 - [Entrypoints](./entrypoints.md): defines how `provide()` and imperative entrypoint patterns interact with resolution policy.
 - [Diagnostics and Introspection](./diagnostics.md): defines error-locality and graph introspection expectations.
 
@@ -27,7 +28,7 @@ Semi-strict mode uses explicit roots with implicit transitive expansion:
 -   Only explicitly bound types are valid resolution roots.
 -   While resolving from those roots, missing transitive concrete dependencies may be implicitly self-bound when they pass existing autowire eligibility checks.
 
-The zero-dependency guard from [Implicit Self-Binding](./implicit_self_binding.md#3-proposed-zero-dependency-guard) is a recommended safety filter, not part of the core mode definition.
+The zero-dependency guard is a recommended safety filter, not part of the core mode definition.
 
 ## 3. Risks (Partially shared with Permissive Mode)
 
