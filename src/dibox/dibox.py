@@ -207,6 +207,13 @@ class DIBox(BindingBox):
             case _: ...
         try:
             signature = inspect.signature(requested_type)
+            # Zero-dependency guard: block classes with no required parameters to prevent silent leaf node creation.
+            if not any(
+                param.default == inspect.Parameter.empty
+                and param.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+                for param in signature.parameters.values()
+            ):
+                raise ResolutionError("type without required parameters needs explicit binding", resolution_stack)
         except (ValueError, TypeError):
             # C extensions, special forms — treat as blacklisted
             raise ResolutionError("requested type is not a concrete class", resolution_stack)

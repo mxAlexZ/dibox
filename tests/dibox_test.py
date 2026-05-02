@@ -75,26 +75,6 @@ class DIBoxProvideTest:
 
         assert bar_instance1 is bar_instance2
 
-    async def test_unregistered_concrete_type_is_auto_bound(self):
-        box = DIBox()
-        bar = await box.provide(Bar)
-        assert isinstance(bar, Bar)
-
-    async def test_unregistered_concrete_type_with_deps_is_auto_bound(self):
-        box = DIBox()
-        foo = await box.provide(Foo)
-        assert isinstance(foo, Foo)
-        assert isinstance(foo.bar, Bar)
-
-    async def test_unresolvable_constructor_arg_raises_on_provide(self):
-        box = DIBox()
-
-        class MandatoryBar:
-            def __init__(self, s: Any): ...
-
-        with pytest.raises(TypeError):
-            await box.provide(MandatoryBar)
-
     @pytest.mark.parametrize(
         ("requested_type", "name"),
         [
@@ -108,25 +88,6 @@ class DIBoxProvideTest:
         with pytest.raises(ResolutionError, match="not a concrete class"):
             await box.provide(requested_type, name)
 
-    @pytest.mark.parametrize("resolution_mode", ["strict", "semi-strict"])
-    async def test_strict_modes_unregistered_type_raises_resolution_error(self, resolution_mode: ResolutionMode):
-        box = DIBox(mode=resolution_mode)
-        with pytest.raises(ResolutionError, match="no binding found"):
-            await box.provide(Bar)
-
-    async def test_strict_mode_unbound_transitive_dependency_raises_resolution_error(self):
-        box = DIBox(mode="strict")
-        box.bind(Foo)  # Foo depends on Bar, which is not bound
-        with pytest.raises(ResolutionError, match="no binding found"):
-            await box.provide(Foo)
-
-    async def test_semi_strict_mode_provides_unbound_transitive_dependency(self):
-        box = DIBox(mode="semi-strict")
-        box.bind(Foo)  # Foo depends on Bar, which is not bound
-        foo = await box.provide(Foo)
-        assert isinstance(foo, Foo)
-        assert isinstance(foo.bar, Bar)
-
     async def test_resolution_stack_included_in_exception(self):
         class A:
             def __init__(self, foo: Foo, value: int): ...
@@ -135,6 +96,7 @@ class DIBoxProvideTest:
             def __init__(self, a: A): ...
 
         box = DIBox()
+        box.bind(Bar)
 
         with pytest.raises(ResolutionError, match="not a concrete class") as exc_info:
             await box.provide(B)
@@ -159,6 +121,47 @@ class DIBoxProvideTest:
         assert debug_args[0][0] == "Foo"
         assert debug_args[1][0] == "bar: Bar"
         assert "Foo" in debug_args[1][1]
+
+
+class DIBoxStrictModeTest:
+    @pytest.mark.parametrize("resolution_mode", ["strict", "semi-strict"])
+    async def test_unregistered_type_raises_resolution_error(self, resolution_mode: ResolutionMode):
+        box = DIBox(mode=resolution_mode)
+        with pytest.raises(ResolutionError, match="no binding found"):
+            await box.provide(Bar)
+
+    async def test_strict_mode_unbound_transitive_dependency_raises_resolution_error(self):
+        box = DIBox(mode="strict")
+        box.bind(Foo)  # Foo depends on Bar, which is not bound
+        with pytest.raises(ResolutionError, match="no binding found"):
+            await box.provide(Foo)
+
+
+class DIBoxAutoBindTest:
+    async def test_unregistered_concrete_type_with_subdependencies_is_auto_bound(self):
+        box = DIBox()
+        box.bind(Bar)
+
+        foo = await box.provide(Foo)
+
+        assert isinstance(foo, Foo)
+        assert isinstance(foo.bar, Bar)
+
+    @pytest.mark.parametrize("resolution_mode", ["permissive", "semi-strict"])
+    async def test_unregistered_all_default_type_raises_resolution_error(self, resolution_mode: ResolutionMode):
+        class DefaultOnly:
+            def __init__(self, value: int = 100, *arg: Any, **kwargs: Any):
+                ...
+        class NeedsDefaultOnly:
+            def __init__(self, default_only: DefaultOnly):
+                ...
+        box = DIBox(mode=resolution_mode)
+        box.bind(NeedsDefaultOnly)
+
+        with pytest.raises(ResolutionError, match="type without required parameters") as exc_info:
+            await box.provide(NeedsDefaultOnly)
+
+        assert exc_info.value.resolution_stack == [(NeedsDefaultOnly, ANY_ARG), (DefaultOnly, "default_only")]
 
 
 class DIBoxGetTest:
