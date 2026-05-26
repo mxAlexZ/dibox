@@ -36,12 +36,6 @@ Async-native dependency injection framework based on type hints.
 - [Why use DIBox?](#why-use-dibox)
   - [The Power of Auto-Wiring](#the-power-of-auto-wiring)
   - [Comparison with Other Frameworks](#comparison-with-other-frameworks)
-    - [vs. Manual Dependency Injection](#vs-manual-dependency-injection)
-    - [vs. dependency-injector](#vs-dependency-injector)
-    - [vs. Injector](#vs-injector)
-    - [vs. Punq](#vs-punq)
-    - [vs. Dishka](#vs-dishka)
-    - [vs. FastAPI's Depends](#vs-fastapis-depends)
 - [Contributing](#contributing)
 
 ## Installation
