@@ -1,9 +1,10 @@
 import inspect
+from collections.abc import Mapping
 from contextlib import AsyncExitStack
-from typing import Any, Callable, TypeVar, cast
+from typing import Any, Callable, TypeVar
 
 from .binding_box import BindingRecord
-from .dimap import ANY_ARG, DIMap, TypeQuery, WildArgName, WildType
+from .dimap import ANY_ARG, DIMap, DIMapKey, TypeQuery, WildArgName, WildType
 
 _T = TypeVar('_T')
 
@@ -22,6 +23,10 @@ class InstanceBox:
         self._items = DIMap[Any]()
         self._exit_stack = AsyncExitStack()
 
+    @property
+    def index(self) -> Mapping[DIMapKey[Any], Any]:
+        """Read-only view of exact-keyed created instances."""
+        return self._items
 
     def get_instance(
         self,
@@ -39,7 +44,7 @@ class InstanceBox:
         **args: Any
     ) -> _T:
         factory_result = await binding_record.call_async(**args) # this can be a context manager instance
-        instance = cast(_T, await self._start_instance(factory_result))
+        instance = await self._start_instance(factory_result)
         self._items[(requested_type, name)] = instance
         return instance
 
@@ -49,7 +54,7 @@ class InstanceBox:
         await self._exit_stack.__aexit__(*exc_details)
         self._items.clear()
 
-    async def _start_instance(self, instance: Any) -> object:
+    async def _start_instance(self, instance: Any) -> Any:
         if hasattr(instance, "__aenter__"):
             return await self._exit_stack.enter_async_context(instance)
         if hasattr(instance, "__enter__"):

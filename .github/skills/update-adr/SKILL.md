@@ -13,6 +13,7 @@ Turn discussion context, implementation changes, and lifecycle splits into conci
 - Prioritize high-value context that is expensive or impossible to infer from code: rationale, trade-offs, non-obvious constraints, known pitfalls.
 - Exclude low-value detail that is easy to recover from source code.
 - Focus on 'why': decisions, DX trade-offs, and open questions. Include implementation detail only when it changes architecture or decision logic.
+- Instead of code-specific names like methods or arguments, use descriptive terms for concepts and roles; only essential key class names related to the specific topic can be included (like `DependencyGraph` in "Dependency Graphs" document).
 - ADRs are not timelines: remove stale context by default. Keep historical notes only when they still affect future decisions.
 - Keep status accurate and explicit: status signals decision maturity to readers. Use values like proposed, partially implemented, implemented.
 - Prefer incremental updates over rewrites; preserve decision history only when it still carries decision value.

@@ -34,3 +34,4 @@ How the container resolves dependencies, manages instance lifetimes, and exposes
 ## Developer Experience
 Tools for debugging, validation, and observability.
  - [diagnostics.md](diagnostics.md): implemented resolution stack errors, proposed cycle detection, `validate()`/`graph()`, module-aware diagnostics, module-level dependency cycles
+ - [dependency_graph.md](dependency_graph.md): separation of resolution logic from `DIBox` hub; `DependencyGraph` owns binding lookup, signature introspection, traversal, and mode enforcement; `BindingLookup` protocol; sync-resolution vs async-materialisation split; planned dual traversal behaviors (fail-fast vs collect-all); deferred graph sharing across scope boundaries

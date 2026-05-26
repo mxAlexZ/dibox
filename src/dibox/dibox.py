@@ -1,20 +1,17 @@
-import inspect
 import logging
 from contextvars import ContextVar, Token
-from typing import Any, Awaitable, Callable, ClassVar, Literal, TypeVar, get_origin, overload
+from typing import Any, Awaitable, Callable, ClassVar, Self, TypeVar, overload
 
 from .binding_box import BindingBox, BindingRecord
-from .dimap import ANY_ARG, ANY_TYPE, DIMapKey, MatchAny, TypeQuery, WildArgName, WildType
+from .dependency_graph import DependencyGraph, ResolutionMode, WalkResult
+from .dimap import ANY_ARG, ANY_TYPE, DIMapKey, MatchAny, TypeQuery, WildArgName
 from .injector import Injector
 from .instance_box import InstanceBox
-from .resolution_error import ResolutionError
-from .resolution_stack import ResolutionStack, format_frame, format_type
+from .resolution_stack import ResolutionStack, format_frame, format_resolution_path, format_type
 
 _T = TypeVar("_T")
 _R = TypeVar("_R")
 logger = logging.getLogger(__name__)
-
-ResolutionMode = Literal["permissive", "strict", "semi-strict"]
 
 
 class DIBox(BindingBox):
@@ -35,9 +32,8 @@ class DIBox(BindingBox):
         self.injector = Injector(self)
         self.modules: list[BindingBox] = []
         self._context_token: Token["DIBox"] | None = None
-        if mode not in ("permissive", "strict", "semi-strict"):
-            raise ValueError(f"Invalid resolution mode: {mode}")
         self._resolution_mode = mode
+        self._dependency_graph = DependencyGraph(mode, bindings=self)
         super().__init__()
 
     @classmethod
@@ -68,9 +64,7 @@ class DIBox(BindingBox):
         """
         self.modules.append(binding_box)
 
-    def find_binding(
-        self, requested_type: TypeQuery[Any], name: WildArgName
-    ) -> tuple[BindingRecord | None, DIMapKey[Any]]:
+    def find_binding(self, requested_type: TypeQuery[Any], name: WildArgName) -> tuple[BindingRecord | None, DIMapKey[Any]]:
         binding_record, key = super().find_binding(requested_type, name)
         if binding_record is not None:
             return binding_record, key
@@ -126,7 +120,15 @@ class DIBox(BindingBox):
         Returns:
             The existing or freshly created instance matching the type and name criteria.
         """
-        return await self._get_or_create_instance(requested_type, name, resolution_stack=[])
+        existing_instance = self.instances.get_instance(requested_type, name)
+        if existing_instance is not None:
+            return existing_instance
+        root_node = self._dependency_graph.build_node((requested_type, name))
+        graph_steps = self._dependency_graph.walk(root_node, present_map=self.instances.index)
+        for step in graph_steps:
+            await self._create_instance(step)
+        instance = self.instances.index[root_node.key]
+        return instance
 
     def get(self, requested_type: TypeQuery[_T], name: WildArgName = ANY_ARG) -> _T:
         """Retrieves an existing instance using type and optional name matching.
@@ -156,113 +158,18 @@ class DIBox(BindingBox):
         """Closes the container and cleans up all created instances."""
         await self.instances.close()
 
-    async def _get_or_create_instance(
-        self,
-        requested_type: TypeQuery[_T],
-        name: WildArgName,
-        resolution_stack: ResolutionStack,
-    ) -> _T:
-        existing_instance = self.instances.get_instance(requested_type, name)
-        if existing_instance is not None:
-            return existing_instance
-        new_instance = await self._create_instance(requested_type, name, resolution_stack)
-        return new_instance
-
-    async def _create_instance(
-        self,
-        requested_type: TypeQuery[_T],
-        name: WildArgName,
-        resolution_stack: ResolutionStack,
-    ) -> _T:
-        resolution_stack.append((requested_type, name))
-        _log_instance_creation(requested_type, name, resolution_stack)
+    async def _create_instance(self, walk_step: WalkResult) -> object:
+        _log_instance_creation(*walk_step.node_key, walk_step.resolution_stack)
+        args: dict[str, object] = {}
+        for name, sub_node_key in walk_step.dependencies.items():
+            args[name] = self.instances.index[sub_node_key]
         try:
-            binding_record, (matched_type, matched_arg) = self.find_binding(requested_type, name)
-            if binding_record is None:
-                # implicit self-binding for concrete classes in non-strict mode
-                binding_record, matched_type = self._make_impicit_binding_record(requested_type, resolution_stack)
-                matched_arg = ANY_ARG
-            # the first argument can be used as a type of the dependency to be created
-            # That's likely needs to be done only for predicate matching, but currently we can't distinguish them
-            args_override = self._bind_factory_type_argument(matched_type, binding_record)
-            args = await self._provide_dependencies(binding_record, args_override, resolution_stack)
-        finally:
-            resolution_stack.pop()
-        instance: _T = await self.instances.create_instance(matched_type, matched_arg, binding_record, **args)
-        return instance
+            return await self.instances.create_instance(*walk_step.node_key, walk_step.binding, **args)
+        except Exception as error:
+            error.add_note(f"Resolution path:\n{format_resolution_path(walk_step.resolution_stack)}")
+            raise
 
-    def _make_impicit_binding_record(
-        self,
-        requested_type: TypeQuery[_T],
-        resolution_stack: ResolutionStack,
-    ) -> tuple[BindingRecord, type[_T]]:
-        if not isinstance(requested_type, type):
-            raise ResolutionError("requested type is not a concrete class", resolution_stack)
-        match self._resolution_mode:
-            case "strict":
-                raise ResolutionError("no binding found", resolution_stack)
-            case "semi-strict":
-                if len(resolution_stack) == 1:
-                    raise ResolutionError("no binding found", resolution_stack)
-            case _: ...
-        try:
-            signature = inspect.signature(requested_type)
-            # Zero-dependency guard: block classes with no required parameters to prevent silent leaf node creation.
-            if not any(
-                param.default == inspect.Parameter.empty
-                and param.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
-                for param in signature.parameters.values()
-            ):
-                raise ResolutionError("type without required parameters needs explicit binding", resolution_stack)
-        except (ValueError, TypeError):
-            # C extensions, special forms — treat as blacklisted
-            raise ResolutionError("requested type is not a concrete class", resolution_stack)
-        binding_record = BindingRecord(
-            async_factory=None, sync_factory=requested_type, signature_info=signature
-        )
-        return binding_record, requested_type
-
-    async def _provide_dependencies(
-        self,
-        consumer: BindingRecord,
-        args_override: dict[str, Any],
-        resolution_stack: ResolutionStack,
-    ) -> dict[str, Any]:
-        args = self._list_dependencies(consumer, args_override)
-        dependencies: dict[str, Any] = {}
-        for arg_name, arg_type in args:
-            dependencies[arg_name] = await self._get_or_create_instance(arg_type, arg_name, resolution_stack)
-        dependencies |= args_override
-        return dependencies
-
-    @staticmethod
-    def _list_dependencies(consumer: BindingRecord, args_override: dict[str, Any]) -> list[tuple[str, type]]:
-        res: list[tuple[str, type]] = []
-        signature = consumer.signature_info
-        for parameter in signature.parameters.values():
-            if (
-                parameter.default == inspect.Parameter.empty
-                and parameter.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
-                and parameter.name not in args_override
-                and parameter.annotation != inspect.Parameter.empty
-            ):
-                res.append((parameter.name, parameter.annotation))
-        return res
-
-    @staticmethod
-    def _bind_factory_type_argument(type_to_create: WildType[Any], binding_record: BindingRecord) -> dict[str, Any]:
-        # the first argument can be used as a type of the dependency to be created
-        res: dict[str, Any] = {}
-        signature = binding_record.signature_info
-        first_arg = next(iter(signature.parameters.values()), None)
-        if first_arg is not None:
-            arg_type = first_arg.annotation
-            # no type annotation or type or type[...] => treat it as a type argument
-            if arg_type == inspect.Parameter.empty or arg_type is type or get_origin(arg_type) is type:
-                res[first_arg.name] = type_to_create
-        return res
-
-    async def __aenter__(self) -> "DIBox":
+    async def __aenter__(self) -> Self:
         self._context_token = DIBox._context_box.set(self)
         return self
 
@@ -280,6 +187,7 @@ class DIBox(BindingBox):
             self._context_token = None
         await self.instances.close(exc_details)
 
+
 def _log_instance_creation(
     requested_type: TypeQuery[_T],
     name: WildArgName,
@@ -287,6 +195,6 @@ def _log_instance_creation(
 ) -> None:
     if logger.isEnabledFor(logging.DEBUG):
         parent = resolution_stack[-2] if len(resolution_stack) > 1 else None
-        parent_part = f" (as dependency of {format_type(parent[0])})" if parent is not None else ""
+        parent_part = f" (from {format_type(parent[0])})" if parent is not None else ""
         requested = format_frame(requested_type, name)
-        logger.debug("Creating instance %s %s", requested, parent_part)
+        logger.debug("Creating instance of %s%s", requested, parent_part)

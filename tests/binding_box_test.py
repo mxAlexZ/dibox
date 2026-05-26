@@ -46,6 +46,9 @@ class BindingBoxTest:
             case "type":
                 box.bind(_ServiceImpl)
                 return _ServiceImpl, ANY_ARG, "impl"
+            case "type, kwarg=":
+                box.bind(_ServiceImpl, tag="kwarg_tag")
+                return _ServiceImpl, ANY_ARG, "kwarg_tag"
             case "type, impl":
                 box.bind(_Service, _ServiceImpl)
                 return _Service, ANY_ARG, "impl"
@@ -105,6 +108,7 @@ class BindingBoxTest:
 
     @pytest.mark.parametrize("test_id", [
         "type",
+        "type, kwarg=",
         "type, impl",
         "type, sync_factory",
         "type, async_factory",

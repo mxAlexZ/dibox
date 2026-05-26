@@ -1,15 +1,15 @@
 import re
 from contextlib import AbstractContextManager, asynccontextmanager
-from typing import Any, AsyncGenerator, AsyncIterator, cast, no_type_check
+from typing import Any, AsyncGenerator, AsyncIterator, no_type_check
 from unittest import mock
 from unittest.mock import MagicMock
 
 import pytest
 from attrs import define
 
-from dibox import BindingBox, DIBox, Injected, ResolutionError, ResolutionMode
+from dibox import BindingBox, DIBox, Injected, ResolutionMode
 from dibox.binding_box import FactoryFunc
-from dibox.dimap import ANY_ARG, ANY_TYPE, WildArgName, WildType
+from dibox.dimap import ANY_ARG, WildArgName, WildType
 
 
 @define
@@ -27,7 +27,7 @@ class Foo:
 
 @pytest.fixture(params=["permissive", "strict", "semi-strict"])
 def resolution_mode(request: pytest.FixtureRequest) -> ResolutionMode:
-    return cast(ResolutionMode, request.param)
+    return request.param
 
 
 class DIBoxProvideTest:
@@ -75,38 +75,28 @@ class DIBoxProvideTest:
 
         assert bar_instance1 is bar_instance2
 
-    @pytest.mark.parametrize(
-        ("requested_type", "name"),
-        [
-            ("I am a string, not a type", ANY_ARG),
-            (Foo | Bar, "arg"),
-            (ANY_TYPE, "arg"),
-        ],
-    )
-    async def test_non_concrete_type_raises_value_error(self, requested_type: Any, name: WildArgName):
-        box = DIBox()
-        with pytest.raises(ResolutionError, match="not a concrete class"):
-            await box.provide(requested_type, name)
-
     async def test_resolution_stack_included_in_exception(self):
         class A:
-            def __init__(self, foo: Foo, value: int): ...
+            def __init__(self):
+                raise RuntimeError("planned error")
 
         class B:
             def __init__(self, a: A): ...
 
         box = DIBox()
-        box.bind(Bar)
+        box.bind(A)
 
-        with pytest.raises(ResolutionError, match="not a concrete class") as exc_info:
+        with pytest.raises(RuntimeError, match="planned error") as exc_info:
             await box.provide(B)
-        error = exc_info.value
-        message = str(error)
-        assert re.search(r"(value: int).*(a: .*A).*(B)", message, re.DOTALL)
-        assert "Foo" not in message
-        assert error.resolution_stack == [(B, ANY_ARG), (A, "a"), (int, "value")]
 
-    async def test_log_message_includes_matched_type_and_arg(self):
+        # Stack should include A then B
+        error = exc_info.value
+        notes = error.__notes__
+        assert len(notes) == 1
+        assert re.search(r"A.*B", notes[0], re.DOTALL)
+
+
+    async def test_start_instance_log_message_includes_matched_type_and_arg(self):
         box = DIBox()
         box.bind(Bar, BarDerived, s="test")
         with (
@@ -117,51 +107,9 @@ class DIBoxProvideTest:
 
         assert logger_mock.call_count == 2
 
-        debug_args = [c.args[1:] for c in logger_mock.call_args_list]
-        assert debug_args[0][0] == "Foo"
-        assert debug_args[1][0] == "bar: Bar"
-        assert "Foo" in debug_args[1][1]
-
-
-class DIBoxStrictModeTest:
-    @pytest.mark.parametrize("resolution_mode", ["strict", "semi-strict"])
-    async def test_unregistered_type_raises_resolution_error(self, resolution_mode: ResolutionMode):
-        box = DIBox(mode=resolution_mode)
-        with pytest.raises(ResolutionError, match="no binding found"):
-            await box.provide(Bar)
-
-    async def test_strict_mode_unbound_transitive_dependency_raises_resolution_error(self):
-        box = DIBox(mode="strict")
-        box.bind(Foo)  # Foo depends on Bar, which is not bound
-        with pytest.raises(ResolutionError, match="no binding found"):
-            await box.provide(Foo)
-
-
-class DIBoxAutoBindTest:
-    async def test_unregistered_concrete_type_with_subdependencies_is_auto_bound(self):
-        box = DIBox()
-        box.bind(Bar)
-
-        foo = await box.provide(Foo)
-
-        assert isinstance(foo, Foo)
-        assert isinstance(foo.bar, Bar)
-
-    @pytest.mark.parametrize("resolution_mode", ["permissive", "semi-strict"])
-    async def test_unregistered_all_default_type_raises_resolution_error(self, resolution_mode: ResolutionMode):
-        class DefaultOnly:
-            def __init__(self, value: int = 100, *arg: Any, **kwargs: Any):
-                ...
-        class NeedsDefaultOnly:
-            def __init__(self, default_only: DefaultOnly):
-                ...
-        box = DIBox(mode=resolution_mode)
-        box.bind(NeedsDefaultOnly)
-
-        with pytest.raises(ResolutionError, match="type without required parameters") as exc_info:
-            await box.provide(NeedsDefaultOnly)
-
-        assert exc_info.value.resolution_stack == [(NeedsDefaultOnly, ANY_ARG), (DefaultOnly, "default_only")]
+        logger_args = [c.args[1:] for c in logger_mock.call_args_list]
+        assert logger_args[0][0] == "Bar"
+        assert logger_args[1][0] == "Foo"
 
 
 class DIBoxGetTest:

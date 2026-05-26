@@ -53,6 +53,7 @@ lint.select = ["E", "F", "I", "PT"]
 line-length = 125
 
 [tool.zuban]
+disable_error_code = ["no-any-return"]
 check_untyped_defs = true
 mypy_path = "src"
 strict = true

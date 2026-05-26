@@ -24,6 +24,19 @@ class InstanceBoxTest:
         await box.create_instance(Bar, ANY_ARG, binding)
         assert box.get_instance(Bar) is instance
 
+    async def test_index_exposes_exact_key_lookup_for_created_instances(self):
+        box = InstanceBox()
+        instance = Bar()
+
+        def factory():
+            return instance
+
+        binding = BindingRecord(None, factory, inspect.signature(factory))
+        await box.create_instance(Bar, ANY_ARG, binding)
+
+        assert (Bar, ANY_ARG) in box.index
+        assert box.index[(Bar, ANY_ARG)] is instance
+
     def test_get_returns_none_for_unknown_type(self):
         box = InstanceBox()
         assert box.get_instance(Bar) is None
