@@ -1,3 +1,14 @@
+## v0.1.12 (2026-05-26)
+### <!-- 0 -->🚀 Features & Enhancements
+- ANY_TYPE/ANY_ARG sentinels instead of None for loose matching
+- Zero-dependency guard to avoid implicit binding of leaf nodes
+
+### <!-- 2 -->🚜 Refactor
+- Build dependency graph independent of instance management
+
+### <!-- 3 -->📚 Documentation
+- Groom ADR docs: self-binding and binding modules
+
 ## v0.1.11 (2026-04-30)
 ### <!-- 0 -->🚀 Features & Enhancements
 - Semi-strict resolution mode
