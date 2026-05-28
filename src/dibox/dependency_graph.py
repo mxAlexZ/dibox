@@ -113,9 +113,10 @@ class DependencyGraph:
         # binding_record, map_position = self._bindings.find_binding(*node_query)
         binding_match = self._bindings.find_binding(*node_query)
         if binding_match is not None:
-            # for predicate-based binding, remake the binding record
-            # TODO: bind arguments only for predicate-based bindings
-            binding_record = self._bind_factory_type_argument(binding_match.key[0], binding_match.binding)
+            binding_record = binding_match.binding
+            if binding_match.via_predicate:
+                # for predicate-based binding, make a specialized binding record with bound constructed type.
+                binding_record = self._bind_factory_type_argument(binding_match.key[0], binding_record)
             return binding_record, binding_match.key
         if not self._implicit_binding_allowed(resolution_stack):
             raise ResolutionError("no binding found", resolution_stack)

@@ -227,14 +227,21 @@ class BindingBoxTest:
         assert tag == "hello world"
 
     @pytest.mark.parametrize(
-        ("requested_type", "request_arg", "expected_matched_type", "expected_matched_arg", "expected_tag"),
+        (
+            "requested_type",
+            "request_arg",
+            "expected_matched_type",
+            "expected_matched_arg",
+            "expected_tag",
+            "expected_via_predicate",
+        ),
         [
-            (_Service, "rand_arg", _Service, ANY_ARG, "impl"),
-            (_Service, "impl2_arg", _Service, "impl2_arg", "impl2"),
-            (_Foo, "foo_arg", _Foo, ANY_ARG, "_Foo"),
-            (_Foo2, "foo_arg", _Foo2, ANY_ARG, "_Foo2"),
-            (_Service | str, "rand_arg", _Service, ANY_ARG, "impl"),
-            (Union[_Service, str], "rand_arg", _Service, ANY_ARG, "impl"),
+            (_Service, "rand_arg", _Service, ANY_ARG, "impl", False),
+            (_Service, "impl2_arg", _Service, "impl2_arg", "impl2", False),
+            (_Foo, "foo_arg", _Foo, ANY_ARG, "_Foo", True),
+            (_Foo2, "foo_arg", _Foo2, ANY_ARG, "_Foo2", True),
+            (_Service | str, "rand_arg", _Service, ANY_ARG, "impl", False),
+            (Union[_Service, str], "rand_arg", _Service, ANY_ARG, "impl", False),
         ],
     )
     def test_find_binding_returns_correct_binding_record_and_matching_data(
@@ -244,6 +251,7 @@ class BindingBoxTest:
         expected_matched_type: WildType[Any],
         expected_matched_arg: WildArgName,
         expected_tag: str,
+        expected_via_predicate: bool,
     ):
         def _foo_factory(t: type[Any]) -> _Foo:
             return _Foo(t.__name__)
@@ -256,7 +264,7 @@ class BindingBoxTest:
         binding_match = box.find_binding(requested_type, request_arg)
 
         assert binding_match is not None
-        binding, (matched_type, matched_arg) = binding_match
+        binding, (matched_type, matched_arg), via_predicate = binding_match
         try:
             tag = binding.call_sync().tag
         except TypeError:
@@ -264,6 +272,7 @@ class BindingBoxTest:
         assert tag == expected_tag
         assert matched_type == expected_matched_type
         assert matched_arg == expected_matched_arg
+        assert via_predicate == expected_via_predicate
 
     def test_find_binding_returns_none_when_no_match(self):
         box = BindingBox()

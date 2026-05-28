@@ -40,6 +40,7 @@ TypeMatchPredicate = Callable[[type[_T]], bool]
 class BindingMatch(NamedTuple):
     binding: BindingRecord
     key: DIMapKey[Any]
+    via_predicate: bool = False
 
 
 class BindingBox:
@@ -208,7 +209,7 @@ class BindingBox:
         if isinstance(requested_type, type):
             for type_matcher, factory in self._predicate_bindings:
                 if type_matcher(requested_type):
-                    return BindingMatch(factory, (requested_type, ANY_ARG))
+                    return BindingMatch(factory, (requested_type, ANY_ARG), via_predicate=True)
         return None
 
     def _add_binding(
