@@ -2,8 +2,8 @@ from typing import Any, Callable
 
 import pytest
 
-from dibox import ANY_ARG, ANY_TYPE, BindingBox, ResolutionError
-from dibox.dependency_graph import DependencyGraph, NodeKey, ResolutionMode
+from dibox import ANY_ARG, ANY_TYPE, BindingBox, ResolutionError, ResolutionMode
+from dibox.dependency_graph import DependencyGraph, NodeKey
 
 
 class Leaf:
@@ -60,8 +60,7 @@ class DependencyGraphBuildNodeTest:
             {"leaf": (Leaf, ANY_ARG)},
             {"branch": (Branch, ANY_ARG)},
         ]
-        assert [node.binding.sync_factory for node in nodes] == [Leaf, Branch, Root]
-        assert [node.binding.async_factory for node in nodes] == [None, None, None]
+        assert [node.binding.name for node in nodes] == ["Leaf", "Branch", "Root"]
 
     def test_build_node_returns_existing_node_on_repeated_request(self, resolution_mode: ResolutionMode):
         bindings = BindingBox()

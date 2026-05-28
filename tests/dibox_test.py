@@ -241,14 +241,14 @@ class DIBoxLifecycleManagementTest:
             call_records.append("exit_3")
 
         box = DIBox()
-        box.bind(name="manager_1", factory=SyncStartCloseManager)
-        box.bind(name="manager_2", factory=async_cm_factory)
-        box.bind(name="manager_3", factory=async_yield_factory)
+        box.bind(arg_name="manager_1", factory=SyncStartCloseManager)
+        box.bind(arg_name="manager_2", factory=async_cm_factory)
+        box.bind(arg_name="manager_3", factory=async_yield_factory)
 
         async with box:
-            await box.provide(object, name="manager_1")
-            await box.provide(MagicMock, name="manager_2")
-            await box.provide(object, name="manager_3")
+            await box.provide(object, arg_name="manager_1")
+            await box.provide(MagicMock, arg_name="manager_2")
+            await box.provide(object, arg_name="manager_3")
 
         assert call_records == ["enter_1", "enter_2", "enter_3", "exit_3", "exit_2", "exit_1"]
 

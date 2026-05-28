@@ -1,12 +1,11 @@
-import inspect
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any, AsyncIterator, Iterator
 from unittest.mock import Mock
 
 import pytest
 
-from dibox.binding_box import BindingRecord, FactoryFunc
-from dibox.dimap import ANY_ARG
+from dibox import ANY_ARG, BindingRecord
+from dibox.binding_box import FactoryFunc
 from dibox.instance_box import InstanceBox
 
 
@@ -20,7 +19,7 @@ class InstanceBoxTest:
         instance = Bar()
         def factory():
             return instance
-        binding = BindingRecord(None, factory, inspect.signature(factory))
+        binding = BindingRecord(factory)
         await box.create_instance(Bar, ANY_ARG, binding)
         assert box.get_instance(Bar) is instance
 
@@ -31,7 +30,7 @@ class InstanceBoxTest:
         def factory():
             return instance
 
-        binding = BindingRecord(None, factory, inspect.signature(factory))
+        binding = BindingRecord(factory)
         await box.create_instance(Bar, ANY_ARG, binding)
 
         assert (Bar, ANY_ARG) in box.index
@@ -52,7 +51,7 @@ class InstanceBoxTest:
 
         box = InstanceBox()
         factory = BadStart
-        binding = BindingRecord(None, factory, inspect.signature(factory))
+        binding = BindingRecord(factory)
         with pytest.raises(RuntimeError, match="startup failed"):
             await box.create_instance(BadStart, ANY_ARG, binding)
         await box.close()
@@ -111,7 +110,7 @@ class InstanceBoxTest:
             "@asynccontextmanager": async_cm_factory,
         }
         factory = factories[style]
-        return BindingRecord(None, factory, inspect.signature(factory))
+        return BindingRecord(factory)
 
     @pytest.mark.parametrize(
         "lifecycle_manager_style",

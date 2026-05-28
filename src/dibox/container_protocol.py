@@ -6,8 +6,8 @@ _T = TypeVar("_T")
 
 
 class ContainerProtocol(Protocol):
-    def get(self, requested_type: TypeQuery[_T], name: WildArgName = ANY_ARG) -> _T:
+    def get(self, requested_type: TypeQuery[_T], arg_name: WildArgName = ANY_ARG) -> _T:
         ...
 
-    async def provide(self, requested_type: TypeQuery[_T], name: WildArgName = ANY_ARG) -> _T:
+    async def provide(self, requested_type: TypeQuery[_T], arg_name: WildArgName = ANY_ARG) -> _T:
         ...

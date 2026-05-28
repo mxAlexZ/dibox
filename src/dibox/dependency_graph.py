@@ -1,9 +1,9 @@
 import inspect
 from collections.abc import Mapping
-from functools import partial
 from typing import Any, Generator, Literal, NamedTuple, Protocol, cast, get_origin
 
-from .binding_box import BindingRecord
+from .binding_box import BindingMatch
+from .binding_record import BindingRecord
 from .dimap import ANY_ARG, DIMap, DIMapKey, TypeQuery, WildArgName
 from .resolution_error import ResolutionError
 from .resolution_stack import ResolutionStack
@@ -17,8 +17,8 @@ class BindingLookup(Protocol):
     def find_binding(
         self,
         requested_type: TypeQuery[Any],
-        name: WildArgName,
-    ) -> tuple[BindingRecord | None, DIMapKey[Any]]:
+        arg_name: WildArgName,
+    ) -> BindingMatch | None:
         ...
 
 
@@ -96,7 +96,7 @@ class DependencyGraph:
         resolution_stack.append(node_query)
         try:
             binding_record, map_position = self._create_binding(node_query, resolution_stack)
-            dependencies = self._get_dependencies_from_signature(binding_record.signature_info)
+            dependencies = self._get_dependencies_from_signature(binding_record.signature)
             sub_nodes_links: dict[str, NodeKey] = {}
             sub_nodes: list[GraphNode] = []
             for sub_node_query in dependencies:
@@ -110,15 +110,17 @@ class DependencyGraph:
             resolution_stack.pop()
 
     def _create_binding(self, node_query: NodeQuery, resolution_stack: ResolutionStack) -> tuple[BindingRecord, NodeKey]:
-        binding_record, map_position = self._bindings.find_binding(*node_query)
-        if binding_record is not None:
+        # binding_record, map_position = self._bindings.find_binding(*node_query)
+        binding_match = self._bindings.find_binding(*node_query)
+        if binding_match is not None:
             # for predicate-based binding, remake the binding record
             # TODO: bind arguments only for predicate-based bindings
-            binding_record = self._bind_factory_type_argument(map_position[0], binding_record)
-            return binding_record, map_position
+            binding_record = self._bind_factory_type_argument(binding_match.key[0], binding_match.binding)
+            return binding_record, binding_match.key
         if not self._implicit_binding_allowed(resolution_stack):
             raise ResolutionError("no binding found", resolution_stack)
         implicit_binding, matched_type = self._make_implicit_binding_record(node_query[0], resolution_stack)
+        implicit_binding.name = f"{implicit_binding.name} (implicit)"
         node_position = (matched_type, ANY_ARG)
         return implicit_binding, node_position
 
@@ -150,9 +152,8 @@ class DependencyGraph:
                 raise ResolutionError("type without required parameters needs explicit binding", resolution_stack)
         except (ValueError, TypeError):
             raise ResolutionError("requested type is not a concrete class", resolution_stack) from None
-
         return (
-            BindingRecord(async_factory=None, sync_factory=requested_type, signature_info=signature),
+            BindingRecord(requested_type),
             requested_type,
         )
 
@@ -170,9 +171,7 @@ class DependencyGraph:
 
     @staticmethod
     def _bind_factory_type_argument(type_to_create: Any, binding_record: BindingRecord) -> BindingRecord:
-        # TODO: type argument binding for factory functions logically belongs
-        #  to another layer (like BindingBox), not the graph
-        first_parameter = next(iter(binding_record.signature_info.parameters.values()), None)
+        first_parameter = next(iter(binding_record.signature.parameters.values()), None)
         if first_parameter is None:
             return binding_record
 
@@ -183,20 +182,6 @@ class DependencyGraph:
             and get_origin(parameter_type) is not type
         ):
             return binding_record
-
-        async_factory = binding_record.async_factory
-        sync_factory = binding_record.sync_factory
-        signature_info = binding_record.signature_info
-
-        if async_factory is not None:
-            async_factory = partial(async_factory, type_to_create)
-            signature_info = inspect.signature(async_factory)
-        elif sync_factory is not None:
-            sync_factory = partial(sync_factory, type_to_create)
-            signature_info = inspect.signature(sync_factory)
-
-        return BindingRecord(
-            async_factory=async_factory,
-            sync_factory=sync_factory,
-            signature_info=signature_info,
-        )
+        specialization_tag = getattr(type_to_create, "__name__", str(type_to_create))
+        binding_record = binding_record.partial(f"{binding_record.name}[{specialization_tag}]", args=(type_to_create,))
+        return binding_record

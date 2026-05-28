@@ -15,6 +15,7 @@ from typing import (
     overload,
 )
 
+from .binding_record import BindingRecord
 from .dimap import ANY_ARG, ANY_TYPE, DIMap, DIMapKey, TypeQuery, WildArgName, WildType
 
 
@@ -36,24 +37,9 @@ FactoryFunc = (
 BindingTarget = _T | FactoryFunc[_T]
 TypeMatchPredicate = Callable[[type[_T]], bool]
 
-
-class BindingRecord(NamedTuple):
-    async_factory: Callable[..., Awaitable[Any]] | None
-    sync_factory: Callable[..., Any] | None
-    signature_info: inspect.Signature
-    # todo: calling protocol (e.g. if type is passed as an argument to the factory)
-
-    def call_sync(self, *args: Any, **kwargs: Any) -> Any:
-        if self.sync_factory is not None:
-            return self.sync_factory(*args, **kwargs)
-        raise RuntimeError("synchronous calls are not supported")
-
-    async def call_async(self, *args: Any, **kwargs: Any) -> Any:
-        if self.async_factory is not None:
-            return await self.async_factory(*args, **kwargs)
-        if self.sync_factory is not None:
-            return self.call_sync(*args, **kwargs)
-        raise RuntimeError("no factory function is available")
+class BindingMatch(NamedTuple):
+    binding: BindingRecord
+    key: DIMapKey[Any]
 
 
 class BindingBox:
@@ -68,14 +54,15 @@ class BindingBox:
     """
 
     def __init__(self) -> None:
-        self.map: DIMap[BindingRecord] = DIMap()  # type -> Binding
-        self.func_matchers: list[tuple[TypeMatchPredicate[Any], BindingRecord]] = []  # predicate -> Binding
+        self._map: DIMap[BindingRecord] = DIMap()  # type -> Binding
+        self._predicate_bindings: list[tuple[TypeMatchPredicate[Any], BindingRecord]] = []  # predicate -> Binding
 
-    # --- Bind overloads ---
+    # region bind(...) overloads
     @overload
     def bind(
         self,
         type_selector: type[_T],
+        *, binding_name: str | None = None,
         **kwargs: Any,
     ) -> None: ...
 
@@ -84,6 +71,7 @@ class BindingBox:
         self,
         type_selector: WildType[_T] | TypeMatchPredicate[_T],
         target: BindingTarget[_T],
+        *, binding_name: str | None = None,
         **kwargs: Any,
     ) -> None: ...
 
@@ -91,8 +79,9 @@ class BindingBox:
     def bind(
         self,
         type_selector: WildType[_T],
-        name: WildArgName,
+        arg_name: WildArgName,
         target: BindingTarget[_T],
+        *, binding_name: str | None = None,
         **kwargs: Any,
     ) -> None: ...
 
@@ -100,9 +89,10 @@ class BindingBox:
     def bind(
         self,
         type_selector: WildType[_T] | TypeMatchPredicate[_T] = ANY_TYPE,
-        name: WildArgName = ANY_ARG,
+        arg_name: WildArgName = ANY_ARG,
         *,
         target: BindingTarget[_T],
+        binding_name: str | None = None,
         **kwargs: Any,
     ) -> None: ...
 
@@ -110,9 +100,10 @@ class BindingBox:
     def bind(
         self,
         type_selector: WildType[_T] | TypeMatchPredicate[_T] = ANY_TYPE,
-        name: WildArgName = ANY_ARG,
+        arg_name: WildArgName = ANY_ARG,
         *,
         factory: FactoryFunc[_T],
+        binding_name: str | None = None,
         **kwargs: Any,
     ) -> None: ...
 
@@ -120,9 +111,10 @@ class BindingBox:
     def bind(
         self,
         type_selector: WildType[_T] | TypeMatchPredicate[_T] = ANY_TYPE,
-        name: WildArgName = ANY_ARG,
+        arg_name: WildArgName = ANY_ARG,
         *,
         instance: _T,
+        binding_name: str | None = None,
         **kwargs: Any,
     ) -> None: ...
 
@@ -130,10 +122,11 @@ class BindingBox:
         self,
         *args: Any,
         type_selector: WildType[_T] | TypeMatchPredicate[_T] | _MissingType = _MISSING,
-        name: WildArgName | _MissingType = _MISSING,
+        arg_name: WildArgName | _MissingType = _MISSING,
         target: BindingTarget[_T] | _MissingType = _MISSING,
         factory: FactoryFunc[_T] | _MissingType = _MISSING,
         instance: _T | _MissingType = _MISSING,
+        binding_name: str | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -176,7 +169,7 @@ class BindingBox:
         Args:
             *args: Positional convenience forms (see Examples).
             type_selector: Type or predicate selecting which requested types match.
-            name: Optional name for a named binding.
+            name: Optional argument name for argument-based binding.
             target: Class or callable used as the binding target.
             factory: Explicit factory callable (sync or async).
             instance: Pre-created instance to return.
@@ -185,10 +178,13 @@ class BindingBox:
         Notes:
             - Extra keyword arguments passed to ``bind`` are forwarded to the factory when called.
         """
-        type_selector, name, factory_record = _dispatch_bind_arguments(
-            args, kwargs, type_selector, name, target, factory, instance
+        type_selector, arg_name, factory_record = _dispatch_bind_arguments(
+            args, kwargs, type_selector, arg_name, target, factory, instance
         )
-        self._add_binding(type_selector, name, factory_record)
+        if binding_name is not None:
+            factory_record.name = binding_name
+        self._add_binding(type_selector, arg_name, factory_record)
+    # endregion
 
     def bind_many(self, *types: type[Any]) -> None:
         """Convenience method to self-bind multiple types at once.
@@ -200,35 +196,40 @@ class BindingBox:
             self.bind(t)
 
     def find_binding(
-        self, requested_type: TypeQuery[Any], name: WildArgName
-    ) -> tuple[BindingRecord | None, DIMapKey[Any]]:
+        self,
+        requested_type: TypeQuery[Any],
+        arg_name: WildArgName,
+    ) -> BindingMatch | None:
         # look in the map type->binding
-        matched_binding, matched_key = self.map.find_match(requested_type, name)
+        matched_binding, matched_key = self._map.find_match(requested_type, arg_name)
         if matched_binding is not None:
-            return matched_binding, matched_key
+            return BindingMatch(matched_binding, matched_key)
         # try predicate-based bindings
         if isinstance(requested_type, type):
-            for type_matcher, factory in self.func_matchers:
+            for type_matcher, factory in self._predicate_bindings:
                 if type_matcher(requested_type):
-                    return factory, (requested_type, ANY_ARG)
-        return None, (ANY_TYPE, ANY_ARG)
+                    return BindingMatch(factory, (requested_type, ANY_ARG))
+        return None
 
     def _add_binding(
-        self, type_selector: WildType[_T] | TypeMatchPredicate[_T], name: WildArgName, factory_record: BindingRecord,
+        self,
+        type_selector: WildType[_T] | TypeMatchPredicate[_T],
+        arg_name: WildArgName,
+        factory_record: BindingRecord,
     ) -> None:
         if inspect.isfunction(type_selector):
-            if name is not ANY_ARG:
+            if arg_name is not ANY_ARG:
                 raise ValueError("name is not allowed when binding to a function")
             type_predicate = cast(TypeMatchPredicate[_T], type_selector)
-            self.func_matchers.append((type_predicate, factory_record))
+            self._predicate_bindings.append((type_predicate, factory_record))
         else:
-            self.map[cast(WildType[_T], type_selector), name] = factory_record
+            self._map[cast(WildType[_T], type_selector), arg_name] = factory_record
 
 def _dispatch_bind_arguments(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
     type_selector: WildType[_T] | TypeMatchPredicate[_T] | _MissingType = _MISSING,
-    name: WildArgName | _MissingType = _MISSING,
+    arg_name: WildArgName | _MissingType = _MISSING,
     target: BindingTarget[_T] | _MissingType = _MISSING,
     factory: FactoryFunc[_T] | _MissingType = _MISSING,
     instance: _T | _MissingType = _MISSING,
@@ -236,26 +237,26 @@ def _dispatch_bind_arguments(
     arg_count = len(args)
     if arg_count == 3:
         # bind(type_selector, name, target, **kwargs)
-        _forbid_kwargs(type_selector, name, target)
-        type_selector, name, target = args
+        _forbid_kwargs(type_selector, arg_name, target)
+        type_selector, arg_name, target = args
     elif arg_count == 2:
         # Could be: bind(type_selector, target) or bind(type_selector, name, *, target/factory/instance=...)
         if factory is not _MISSING or instance is not _MISSING or target is not _MISSING:
             # bind(type_selector, name, target/factory/instance=...)
-            _forbid_kwargs(type_selector, name)
-            type_selector, name = args
+            _forbid_kwargs(type_selector, arg_name)
+            type_selector, arg_name = args
         else:
             # bind(type_selector, target)
-            _forbid_kwargs(type_selector, name)
+            _forbid_kwargs(type_selector, arg_name)
             type_selector, target = args
-            if name is _MISSING:
-                name = ANY_ARG
+            if arg_name is _MISSING:
+                arg_name = ANY_ARG
     elif arg_count == 1:
         # bind(type_selector, target/factory/instance=...) or bind(type_selector, name=..., factory/instance=...)
         # or bind(type_selector)
         _forbid_kwargs(type_selector)
         type_selector = args[0]
-        if factory is _MISSING and instance is _MISSING and target is _MISSING and name is _MISSING:
+        if factory is _MISSING and instance is _MISSING and target is _MISSING and arg_name is _MISSING:
             # bind(type_selector)
             if isinstance(type_selector, type):
                 target = type_selector
@@ -265,8 +266,8 @@ def _dispatch_bind_arguments(
     else:
         raise TypeError(f"bind() takes at most 3 positional arguments ({arg_count} given)")
 
-    if name is _MISSING:
-        name = ANY_ARG
+    if arg_name is _MISSING:
+        arg_name = ANY_ARG
     if type_selector is _MISSING:
         type_selector = ANY_TYPE
 
@@ -281,33 +282,28 @@ def _dispatch_bind_arguments(
     else:
         raise TypeError("Either target, factory, or instance must be provided")
 
-    return type_selector, name, factory_record # type: ignore[return-value]
+    return type_selector, arg_name, factory_record # type: ignore[return-value]
 
 
 def _create_binding_record_for_factory(func: FactoryFunc[Any], **kwargs: Any) -> BindingRecord:
-    func = cast(FactoryFunc[Any], func if not kwargs else partial(func, **kwargs))
+    binding_name = None
+    if kwargs:
+        binding_name = getattr(func, "__name__", None)
+        func = partial(func, **kwargs)
+        if binding_name is not None:
+            binding_name += f"({kwargs})"
+
     if inspect.isasyncgenfunction(func):
         func = asynccontextmanager(cast(Callable[..., AsyncIterator[Any]], func))
     elif inspect.isgeneratorfunction(func):
         func = contextmanager(cast(Callable[..., Iterator[Any]], func))
-    if inspect.iscoroutinefunction(func):
-        # If it's a coroutine function, we can only support async calls.
-        async_factory = cast(Callable[..., Awaitable[Any]], func)
-        return BindingRecord(async_factory=async_factory, sync_factory=None, signature_info=inspect.signature(func))
-    else:
-        # it's a sync factory, we can wrap it to support async calls as well.
-        sync_factory = cast(Callable[..., Any], func)
-        return BindingRecord(async_factory=None, sync_factory=sync_factory, signature_info=inspect.signature(func))
+    return BindingRecord(func, binding_name)
 
 
 def _create_binding_record_for_instance(instance: Any, **kwargs: Any) -> BindingRecord:
     if kwargs:
         raise ValueError("Cannot pass kwargs when binding to an instance")
-
-    def sync_factory() -> Any:
-        return instance
-
-    return BindingRecord(async_factory=None, sync_factory=sync_factory, signature_info=inspect.Signature())
+    return BindingRecord(lambda: instance, name=str(instance))
 
 
 def _create_binding_record_for_generic_target(target: BindingTarget[_T], **kwargs: Any) -> BindingRecord:

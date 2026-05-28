@@ -3,7 +3,7 @@ from collections.abc import Mapping
 from contextlib import AsyncExitStack
 from typing import Any, Callable, TypeVar
 
-from .binding_box import BindingRecord
+from .binding_record import BindingRecord
 from .dimap import ANY_ARG, DIMap, DIMapKey, TypeQuery, WildArgName, WildType
 
 _T = TypeVar('_T')

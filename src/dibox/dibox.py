@@ -2,9 +2,9 @@ import logging
 from contextvars import ContextVar, Token
 from typing import Any, Awaitable, Callable, ClassVar, Self, TypeVar, overload
 
-from .binding_box import BindingBox, BindingRecord
+from .binding_box import BindingBox, BindingMatch
 from .dependency_graph import DependencyGraph, ResolutionMode, WalkResult
-from .dimap import ANY_ARG, ANY_TYPE, DIMapKey, MatchAny, TypeQuery, WildArgName
+from .dimap import ANY_ARG, MatchAny, TypeQuery, WildArgName
 from .injector import Injector
 from .instance_box import InstanceBox
 from .resolution_stack import ResolutionStack, format_frame, format_resolution_path, format_type
@@ -64,15 +64,15 @@ class DIBox(BindingBox):
         """
         self.modules.append(binding_box)
 
-    def find_binding(self, requested_type: TypeQuery[Any], name: WildArgName) -> tuple[BindingRecord | None, DIMapKey[Any]]:
-        binding_record, key = super().find_binding(requested_type, name)
-        if binding_record is not None:
-            return binding_record, key
+    def find_binding(self, requested_type: TypeQuery[Any], arg_name: WildArgName) -> BindingMatch | None:
+        binding_match = super().find_binding(requested_type, arg_name)
+        if binding_match is not None:
+            return binding_match
         for module in reversed(self.modules):
-            binding_record, key = module.find_binding(requested_type, name)
-            if binding_record is not None:
-                return binding_record, key
-        return None, (ANY_TYPE, ANY_ARG)  # no binding found
+            binding_match = module.find_binding(requested_type, arg_name)
+            if binding_match is not None:
+                return binding_match
+        return None
 
     def inject(self, func: Callable[..., _R]) -> Callable[..., _R]:
         """Decorates a function so missing injectable arguments come from this container.
@@ -96,11 +96,11 @@ class DIBox(BindingBox):
         raise NotImplementedError("call() method is not implemented yet.")
 
     @overload
-    async def provide(self, requested_type: MatchAny, name: str) -> Any: ...
+    async def provide(self, requested_type: MatchAny, arg_name: str) -> Any: ...
     @overload
-    async def provide(self, requested_type: TypeQuery[_T], name: WildArgName = ANY_ARG) -> _T: ...
+    async def provide(self, requested_type: TypeQuery[_T], arg_name: WildArgName = ANY_ARG) -> _T: ...
 
-    async def provide(self, requested_type: TypeQuery[_T], name: WildArgName = ANY_ARG) -> _T:
+    async def provide(self, requested_type: TypeQuery[_T], arg_name: WildArgName = ANY_ARG) -> _T:
         """Provides an instance of the requested type, with optional name-based binding.
 
         This is the primary method for dependency resolution. DIBox matches dependencies
@@ -120,17 +120,17 @@ class DIBox(BindingBox):
         Returns:
             The existing or freshly created instance matching the type and name criteria.
         """
-        existing_instance = self.instances.get_instance(requested_type, name)
+        existing_instance = self.instances.get_instance(requested_type, arg_name)
         if existing_instance is not None:
             return existing_instance
-        root_node = self._dependency_graph.build_node((requested_type, name))
+        root_node = self._dependency_graph.build_node((requested_type, arg_name))
         graph_steps = self._dependency_graph.walk(root_node, present_map=self.instances.index)
         for step in graph_steps:
             await self._create_instance(step)
         instance = self.instances.index[root_node.key]
         return instance
 
-    def get(self, requested_type: TypeQuery[_T], name: WildArgName = ANY_ARG) -> _T:
+    def get(self, requested_type: TypeQuery[_T], arg_name: WildArgName = ANY_ARG) -> _T:
         """Retrieves an existing instance using type and optional name matching.
 
         This synchronous method looks up already-created instances in the container.
@@ -149,7 +149,7 @@ class DIBox(BindingBox):
             KeyError: If no matching instance is found. Use `provide()` to create
                 new instances with automatic dependency resolution.
         """
-        instance = self.instances.get_instance(requested_type, name)
+        instance = self.instances.get_instance(requested_type, arg_name)
         if instance is None:
             raise KeyError(f"Instance of {requested_type} is not found")
         return instance
