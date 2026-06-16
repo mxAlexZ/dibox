@@ -142,7 +142,7 @@ class DependencyGraph:
         if not isinstance(requested_type, type):
             raise ResolutionError("requested type is not a concrete class", resolution_stack)
         try:
-            signature = inspect.signature(requested_type)
+            signature = inspect.signature(requested_type, eval_str=True)
             # Zero-dependency guard: require at least one required constructor parameter
             # to prevent silent leaf node creation.
             if not any(

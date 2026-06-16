@@ -13,7 +13,7 @@ class BindingRecord:
 
     @property
     def signature(self) -> inspect.Signature:
-        return inspect.signature(self._factory)
+        return inspect.signature(self._factory, eval_str=True)
 
     def call_sync(self, *args: Any, **kwargs: Any) -> Any:
         if self._is_async:

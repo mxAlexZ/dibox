@@ -223,6 +223,26 @@ class DependencyGraphStrictModeTest:
         assert exc_info.value.resolution_stack == [(Root, ANY_ARG), (Branch, "branch")]
 
 
+class DependencyGraphFutureAnnotationsBugTest:
+    """Regression tests for the __future__.annotations compatibility bug.
+
+    With `from __future__ import annotations`, all annotations are stored as strings
+    at compile time. inspect.signature() returns string annotations instead of live
+    types, the binding lookup then fails to match the bound class
+    """
+
+    def test_future_annotations_breaks_dependency_resolution(self):
+        from future_annotations_classes import FutureBranch, FutureLeaf
+
+        bindings = BindingBox()
+        bindings.bind_many(FutureLeaf, FutureBranch)
+        graph = DependencyGraph("strict", bindings)
+
+        branch_node = graph.build_node((FutureBranch, ANY_ARG))
+        assert branch_node.key == (FutureBranch, ANY_ARG)
+        assert branch_node.sub_nodes_keys == {"leaf": (FutureLeaf, ANY_ARG)}
+
+
 def factory_no_args() -> Leaf:
     return Leaf("factory_no_args")
 
