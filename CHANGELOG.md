@@ -1,3 +1,14 @@
+## v0.1.13 (2026-06-16)
+### <!-- 0 -->🚀 Features & Enhancements
+- Support custom names and better default string representation for bindings
+
+### <!-- 1 -->🐛 Bug Fixes
+- Bind type arguments only for predicate-based factories
+- Follow string annotations (__future__.annotations compatibility)
+
+### <!-- 3 -->📚 Documentation
+- Remove broken links from README.md
+
 ## v0.1.12 (2026-05-26)
 ### <!-- 0 -->🚀 Features & Enhancements
 - ANY_TYPE/ANY_ARG sentinels instead of None for loose matching
