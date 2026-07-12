@@ -135,6 +135,29 @@ class BindingBoxTest:
         assert binding_match is not None
         assert (await binding_match.binding.call_async()).tag == expected_tag
 
+    def test_bind_overloads_are_accepted_by_typechecker(self):
+        # This test is a type-checking test. It doesn't have to run, but it should pass type checking.
+        box = BindingBox()
+        box.bind(_Service, _ServiceImpl)
+        box.bind(_Service, lambda: _ServiceImpl())
+        box.bind(_Service, _service_instance)
+        box.bind(_Service, "arg", _ServiceImpl)
+        box.bind(_Service, "arg", _service_instance)
+
+        box.bind(_Service, target=_ServiceImpl)
+        box.bind(_Service, factory=_sync_factory)
+        box.bind(_Service, instance=_service_instance)
+
+        box.bind(arg_name="arg", target=_ServiceImpl)
+        box.bind(arg_name="arg", factory=_sync_factory)
+        box.bind(arg_name="arg", instance=_service_instance)
+
+        box.bind(lambda t: "Foo" in t.__name__, lambda t: t())
+        box.bind(_is_foo, target=lambda t: t())
+        box.bind(_always_true, factory=lambda t: t())
+        box.bind(_always_true, _service_instance)
+        box.bind(_always_true, instance=_service_instance)
+
     def test_bind_with_named_binding(self):
         box = BindingBox()
         box.bind(_Service, target=_ServiceImpl, binding_name="named_binding")
