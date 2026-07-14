@@ -342,7 +342,12 @@ class BindingBoxTest:
 
     def test_bind_many_registers_all_types(self):
         box = BindingBox()
-        box.bind_many(_ServiceImpl, _Foo2)
+        box.bind_many(
+            _ServiceImpl,
+            _Foo2,
+            (_Service, _ServiceImpl),
+            (_Service, "arg", _service_instance),
+        )
         binding_match_1 = box.find_binding(_ServiceImpl, ANY_ARG)
         assert binding_match_1 is not None
         t1 = binding_match_1.binding
@@ -353,3 +358,26 @@ class BindingBoxTest:
         t2 = binding_match_2.binding
         assert t2 is not None
         assert isinstance(t2.call_sync(), _Foo2)
+        binding_match_3 = box.find_binding(_Service, ANY_ARG)
+        assert binding_match_3 is not None
+        t3 = binding_match_3.binding
+        assert t3 is not None
+        assert isinstance(t3.call_sync(), _ServiceImpl)
+        binding_match_4 = box.find_binding(_Service, "arg")
+        assert binding_match_4 is not None
+        t4 = binding_match_4.binding
+        assert t4 is not None
+        assert t4.call_sync() is _service_instance
+
+
+    def test_bind_many_tuples_are_accepted_by_typechecker(self):
+        # This test is a type-checking test. It doesn't have to run, but it should pass type checking.
+        box = BindingBox()
+        box.bind_many(
+            _Service,
+            (_Service, _ServiceImpl),
+            (_Service, _sync_factory),
+            (_Service, "arg", _ServiceImpl),
+            (lambda t: "Foo" in t.__name__, lambda t: t()),
+            (_is_foo, _service_instance),
+        )

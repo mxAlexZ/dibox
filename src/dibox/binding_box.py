@@ -219,14 +219,24 @@ class BindingBox:
         self._add_binding(resolved_type_selector, arg_name, factory_record)
     # endregion
 
-    def bind_many(self, *types: type[Any]) -> None:
-        """Convenience method to self-bind multiple types at once.
+    def bind_many(
+        self,
+        *types: type[Any] |
+                tuple[WildType[Any], BindingTarget[Any]] |
+                tuple[WildType[Any], WildArgName, BindingTarget[Any]] |
+                tuple[TypeMatchPredicate, TypeAwareFactoryFunc | FactoryFunc[object] | object]
+    ) -> None:
+        """Register multiple bindings at once.
 
-        Equivalent to calling ``bind(T)`` for each provided type.
-        Useful in strict mode to reduce boilerplate when registering many concrete services.
+        Each argument is either a bare type (self-binding) or a tuple matching
+        positional forms of ``bind``:
+        ``(type, target)``, ``(type, arg_name, target)``, or ``(predicate, target)``.
         """
         for t in types:
-            self.bind(t)
+            if isinstance(t, tuple):
+                self.bind(*t)  # type: ignore # pyright can't resolve overloads from unpacked union-of-tuples
+            else:
+                self.bind(t)
 
     def find_binding(
         self,

@@ -19,10 +19,16 @@ be registered explicitly, without the noise of repeating the name twice:
 
 ```python
 box.bind(ServiceA)
-box.bind_many(ServiceA, ServiceB, ServiceC)  # convenience: self-binds each type
+box.bind_many(ServiceA, ServiceB, ServiceC)
+box.bind_many(
+    (PortA, PortAImpl),
+    (Client, "primary", PrimaryClient)
+)
 ```
 
-`bind_many(*types)` is a thin wrapper that calls `bind(T)` for each type. No new binding model —
+`bind_many(*items)` is a thin wrapper that forwards each item to `bind(...)` using the same
+positional forms (`T`, `(T, target)`, `(T, arg_name, target)`, `(predicate, target)`).
+No new binding model —
 resolution, precedence, and override behavior are unchanged.
 
 ## Yield and context managers

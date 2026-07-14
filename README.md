@@ -367,7 +367,7 @@ box.bind(StorageClient, S3StorageClient)             # interface → implementat
 box.bind_many(Database, AuthService, ReportService)  # every concrete type must be declared
 ```
 
-`bind(T)` self-binds a type (equivalent to `bind(T, T)`). `bind_many(...)` registers several at once, turning the registration requirement into a compact ownership declaration.
+`bind(T)` registers one self-binding. `bind_many(...)` is just shorthand for registering several bindings at once; behavior is the same as calling `bind(...)` repeatedly.
 
 Migrating from permissive: switch `DIBox()` to `DIBox(mode="semi-strict")` or `DIBox(mode="strict")` and add explicit bindings for the types the container should own. For most apps this is a handful of lines.
 
