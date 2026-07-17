@@ -56,7 +56,7 @@ DIBox resolves, instantiates, and injects dependencies by following naturally de
 - **Lifecycle Management:** Resources start and clean up automatically. DIBox recognizes context managers, generator factories and `start`/`close` conventions.
 - **Context-aware `@inject`:** Decorate at import time, resolve at call time from the active container — no container reference at the call site.
 - **Flexible Bindings:** Interfaces, instances, sync/async factories, named dependencies, and predicate-based bindings.
-- **Resolution Modes:** Permissive mode for zero-config onboarding; semi-strict for explicit root ownership with implicit binding for internal dependencies; strict for exhaustive explicit control.
+- **Resolution Controls:** Permissive, semi-strict, and strict modes control where implicit binding applies; creation policies can allowlist packages and deny specific categories without registering every concrete type.
 - **Non‑Invasive:** Works with any class using type hints — third-party SDKs, dataclasses, attrs — no wrappers or base classes required.
 - **Modular:** Group bindings into reusable `BindingBox` modules. Compose, override, and share across workers, tests, and entry points.
 - **Typed API:** Fully type-annotated — works seamlessly with type checkers and IDE autocompletion.
@@ -131,7 +131,7 @@ async def run():
 asyncio.run(run())
 ```
 
-> **Next step:** The quickstart uses permissive mode (the default), where unbound concrete types are automatically created (implicitly self-bound). For non-trivial apps, semi-strict or strict mode is recommended. See [Resolution Modes](#resolution-modes).
+> **Next step:** The quickstart uses permissive mode (the default), where unbound concrete types are automatically created (implicitly self-bound). It keeps concrete graphs low-boilerplate. Use semi-strict or strict mode to control where implicit binding applies, or a deny-all policy to allowlist which types qualify. See [Resolution Modes](#resolution-modes).
 
 ## Usage Guide
 
@@ -343,21 +343,25 @@ box = DIBox(mode="strict")       # strict
 
 What changes is _implicit self-binding_: whether the container is allowed to treat an unbound concrete type as its own factory when no `bind()` entry exists for it.
 
-**Permissive (default)** — any concrete type with a type-annotated constructor is implicitly self-bound: it resolves without an explicit `bind()`. The QuickStart examples use this mode. It is the fastest way to get going, but container ownership becomes implicit: any reachable concrete type resolves without error, which can mask misconfiguration as the app grows.
+- **Permissive (default)** — an unbound concrete type may be implicitly self-bound without an explicit `bind()`, subject to the implicit creation policy. The default policy blocks common primitive/value leaves such as `str`, `int`, and `Path`. The QuickStart examples use this mode. It keeps concrete graphs low-boilerplate; use a deny-all policy to restrict eligibility to owned packages without registering each type.
 
-**Semi-strict (recommended for most apps)** — declare which types are owned resolution roots with `bind()`; the container implicitly self-binds their concrete transitive dependencies. Ownership is explicit at the boundary — where it matters — without requiring pre-registration of every interior implementation detail.
+- **Semi-strict** — declare which types are owned resolution roots with `bind()`; the container implicitly self-binds their concrete transitive dependencies. Ownership is explicit at the boundary — where it matters — without requiring pre-registration of every interior implementation detail.
+
+- **Strict** — every type in the dependency graph must be explicitly registered. Implicit self-binding is disabled: the container raises an error for any unbound type. Use it when you want exhaustive, registry-level visibility over every type the container may resolve.
+
+Types that cannot be inferred — interfaces, external values, and raw parameters — always need explicit bindings. Implicit self-binding only fills in concrete services with no configuration decisions.
+
+##### Semi-strict example
 
 ```python
 box = DIBox(mode="semi-strict")
 
 box.bind(AppConfig, instance=load_config())          # external value — always explicit
 box.bind(StorageClient, S3StorageClient)             # interface → implementation
-box.bind_many(Database, AuthService, ReportService)  # root services; transitive concrete deps implicitly self-bound
+box.bind_many(AuthService, ReportService)  # root services; transitive concrete deps implicitly self-bound
 ```
 
-Types that cannot be inferred — interfaces, external values, raw parameters — still need explicit bindings regardless of mode. Implicit self-binding only fills in concrete intermediate services that have no configuration decisions.
-
-**Strict** — every type in the dependency graph must be explicitly registered. Implicit self-binding is disabled: the container raises an error for any unbound type. Preferred when you want exhaustive, registry-level visibility over every type the container may resolve.
+##### Strict example
 
 ```python
 box = DIBox(mode="strict")
@@ -367,9 +371,46 @@ box.bind(StorageClient, S3StorageClient)             # interface → implementat
 box.bind_many(Database, AuthService, ReportService)  # every concrete type must be declared
 ```
 
-`bind(T)` registers one self-binding. `bind_many(...)` is just shorthand for registering several bindings at once; behavior is the same as calling `bind(...)` repeatedly.
+`bind(T)` registers one self-binding. `bind_many(...)` is shorthand for registering several bindings at once; behavior is the same as calling `bind(...)` repeatedly.
 
-Migrating from permissive: switch `DIBox()` to `DIBox(mode="semi-strict")` or `DIBox(mode="strict")` and add explicit bindings for the types the container should own. For most apps this is a handful of lines.
+##### Controlling implicit creation
+
+Resolution mode decides where implicit self-binding may happen: at roots and dependencies, only at dependencies, or nowhere. Where the mode permits it, the implicit creation policy decides which unbound concrete types qualify.
+
+The policy evaluates each type in this order:
+
+1. A matching deny rule denies it.
+2. Otherwise, a matching allow rule allows it.
+3. If no rule matches, the configured guard decides.
+
+In short, deny rules take precedence over allow rules, and matching rules take precedence over the guard. The `"deny-all"` guard is therefore a fallback, not a deny rule: it denies only types that matched no allow rule. This turns allow rules into a strict allowlist without requiring every concrete graph type to be registered.
+
+Rules can match packages and their subpackages, exact types, or custom predicates. This example allows application-owned types while requiring explicit bindings for Pydantic DTOs:
+
+```python
+from dibox import DIBox, ImplicitCreationPolicy
+from pydantic import BaseModel
+
+policy = ImplicitCreationPolicy(guard="deny-all")
+policy.allow_package("my_app")
+policy.deny_if(
+    lambda type_to_check: issubclass(type_to_check, BaseModel),
+    name="Pydantic DTOs",
+)
+
+box = DIBox(implicit_creation_policy=policy)
+```
+
+The result is:
+
+- Other types in `my_app` match the package allow rule and are allowed before the guard runs.
+- Pydantic models in `my_app` match both rules but are denied because deny rules come first.
+- Types outside `my_app` match neither rule and are denied by the `"deny-all"` guard.
+- Explicit bindings bypass the policy, allowing intentional exceptions for any denied type.
+
+The other guards are `"value-types"` (the default), which blocks common primitive and value types; `"zero-dependency"`, which blocks types without required constructor parameters; and `"none"`, which allows every unmatched concrete type.
+
+Combine this policy with permissive mode when allowlisted types may be resolution roots, or semi-strict mode when roots should still be explicitly bound. Strict mode disables implicit self-binding entirely and therefore does not consult the policy.
 
 ### Binding Modules
 
@@ -486,7 +527,7 @@ async def test_classifier():
 #### Resolution order
 
 When the same type is bound in multiple places, **last registered wins**: container's own `bind()` calls always take highest precedence, then modules in reverse registration order.
-If no binding matches at all, DIBox falls back to using the requested type as its own factory — this is what makes `await box.provide(SomeService)` work without an explicit `box.bind(SomeService)`. This fallback is permissive mode behavior; semi-strict restricts it to transitive dependencies only, and strict disables it entirely. See [Resolution Modes](#resolution-modes).
+If no binding matches at all, DIBox can fall back to using the requested type as its own factory — this is what makes `await box.provide(SomeService)` work without an explicit `box.bind(SomeService)`. Permissive mode allows this at roots and dependencies, semi-strict restricts it to transitive dependencies, and strict disables it. In the first two modes, the implicit creation policy can further restrict eligible types. See [Resolution Modes](#resolution-modes).
 
 ## Why use DIBox?
 ### The Power of Auto-Wiring

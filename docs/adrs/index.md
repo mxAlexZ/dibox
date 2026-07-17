@@ -16,13 +16,14 @@ ADRs that define the ecosystem and guiding principles. Read first when onboardin
 How dependencies are declared, registered, and organized into modules.
  - [bind_api.md](bind_api.md): `bind(...)` argument forms, `bind_many`, generator/contextmanager factory support, rejected fluent APIs
  - [binding_modules.md](binding_modules.md): implemented `BindingBox` modules via `add_bindings`; composition-root grouping, module precedence
- - [package_binding.md](package_binding.md): `PackageBindingBox` package scanning, auto-self-binding filters
+ - [package_binding.md](package_binding.md): deferred concept for scanning a package to emit bulk explicit self-binds; scoped to strict mode only, since implicit creation policy `allow_package` already covers permissive/semi-strict; key tension is discovery timing (lazy imports vs eager-scan import side effects)
  - [named_bindings.md](named_bindings.md): argument-name matching as default, `Annotated` + `Named`/`Token` as explicit override, `NewType` alternative, third-party integration pattern
 
 ## Resolution & Runtime
 How the container resolves dependencies, manages instance lifetimes, and exposes injection entrypoints.
  - [implicit_self_binding.md](implicit_self_binding.md): implicit self-binding as shared permissive/semi-strict mechanism for zero-config concrete graph internals; permissive onboarding defaults, semi-strict root-boundary mitigation, open-graph risks
- - [zero_dependency_guard.md](zero_dependency_guard.md): proposed guard blocking implicit self-binding for leaf-node types (zero required args); explicit-binding requirements for config/secrets/all-default constructors; container-contribution test
+ - [implicit_creation_policy.md](implicit_creation_policy.md): implicit self-binding eligibility for unbound concrete types in permissive/semi-strict resolution; allow and deny rules match packages, exact types, or arbitrary predicates, with deny precedence; fallback guards handle unruled types: `"value-types"` defaults to blocking known values, `"zero-dependency"` blocks zero-arg constructors, and `"deny-all"` creates strict allowlists
+ - [zero_dependency_guard.md](zero_dependency_guard.md): earlier proposed hard-coded guard for zero-required-arg leaf types; predecessor context for implicit creation policy
  - [strict_mode.md](strict_mode.md): strict-mode explicit-binding contract, fail-fast semantics, migration path from permissive defaults
  - [entrypoints.md](entrypoints.md): `@inject` + contextvar container resolution, `Injected[T]` + signature rewriting, `container.call()`/`partial()`, `Injector`, mode-dependent behavior
  - [semi_strict_mode.md](semi_strict_mode.md): implemented middle mode (explicit roots + implicit transitive expansion), with open introspection-surface questions and optional safety-filter follow-ups

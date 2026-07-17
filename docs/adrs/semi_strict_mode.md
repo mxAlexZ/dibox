@@ -1,6 +1,6 @@
 # Semi-Strict Resolution
 
-Status: Implemented. Core semi-strict resolution is implemented. Diagnostics/introspection refinements and the zero-dependency guard remain follow-up improvements.
+Status: Implemented. Core semi-strict resolution and implicit creation policy integration are implemented; diagnostics/introspection refinements remain follow-up improvements.
 
 This document defines a third resolution strategy between permissive implicit self-binding
 and fully explicit strict mode.
@@ -9,7 +9,7 @@ Related ADRs:
 
 - [Strict Mode](./strict_mode.md): defines the explicit-binding baseline that semi-strict keeps at the root boundary.
 - [Implicit Self-Binding](./implicit_self_binding.md): defines the permissive transitive expansion behavior semi-strict reuses below explicit roots.
-- [Zero-Dependency Guard](./zero_dependency_guard.md): proposed safety filter for leaf-node implicit construction during transitive expansion.
+- [Implicit Creation Policy](./implicit_creation_policy.md): filters eligible unbound concrete types during transitive expansion.
 - [Entrypoints](./entrypoints.md): defines how `provide()` and imperative entrypoint patterns interact with resolution policy.
 - [Diagnostics and Introspection](./diagnostics.md): defines error-locality and graph introspection expectations.
 
@@ -26,9 +26,9 @@ Semi-strict addresses this gap. The developer declares which types are owned res
 Semi-strict mode uses explicit roots with implicit transitive expansion:
 
 -   Only explicitly bound types are valid resolution roots.
--   While resolving from those roots, missing transitive concrete dependencies may be implicitly self-bound when they pass existing autowire eligibility checks.
+-   While resolving from those roots, missing transitive concrete dependencies may be implicitly self-bound when the implicit creation policy permits them.
 
-The zero-dependency guard is a recommended safety filter, not part of the core mode definition.
+Resolution mode determines where implicit self-binding is available; implicit creation policy filters eligible types within that boundary.
 
 ## 3. Risks (Partially shared with Permissive Mode)
 

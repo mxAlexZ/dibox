@@ -2,7 +2,14 @@ from typing import Any, Callable
 
 import pytest
 
-from dibox import ANY_ARG, ANY_TYPE, BindingBox, ResolutionError, ResolutionMode
+from dibox import (
+    ANY_ARG,
+    ANY_TYPE,
+    BindingBox,
+    ImplicitCreationPolicy,
+    ResolutionError,
+    ResolutionMode,
+)
 from dibox.dependency_graph import DependencyGraph, NodeKey
 
 
@@ -72,22 +79,16 @@ class DependencyGraphBuildNodeTest:
 
         assert root_node_1 is root_node_2
 
-    @pytest.mark.parametrize(
-        "requested_type",
-        [
-            "I am a string, not a type",
-            Leaf | Branch,
-            int,
-            ANY_TYPE
-        ],
-    )
-    def test_build_node_with_non_concrete_type_raises_value_error(self, requested_type: Any):
+    def test_build_node_surfaces_non_concrete_request_denial(self):
         bindings = BindingBox()
         graph = DependencyGraph("permissive", bindings)
-        with pytest.raises(ResolutionError, match="not a concrete class") as exc_info:
-            graph.build_node((requested_type, ANY_ARG))
+        with pytest.raises(
+            ResolutionError,
+            match="implicit creation denied because request is not a concrete class",
+        ) as exc_info:
+            graph.build_node((ANY_TYPE, ANY_ARG))
 
-        assert exc_info.value.resolution_stack == [(requested_type, ANY_ARG)]
+        assert exc_info.value.resolution_stack == [(ANY_TYPE, ANY_ARG)]
 
     def test_bad_resolution_mode_raises_value_error(self):
         with pytest.raises(ValueError, match="Invalid resolution mode"):
@@ -177,15 +178,64 @@ class DependencyGraphPermissiveModeTest:
 
 
     @pytest.mark.parametrize("resolution_mode", ["permissive", "semi-strict"])
-    def test_all_default_constructor_raises_resolution_error(self, resolution_mode: ResolutionMode):
+    def test_default_policy_allows_ordinary_class(self, resolution_mode: ResolutionMode):
         bindings = BindingBox()
         bindings.bind(Branch)
         graph = DependencyGraph(resolution_mode, bindings)
 
-        with pytest.raises(ResolutionError, match="type without required parameters") as exc_info:
+        branch_node = graph.build_node((Branch, ANY_ARG))
+
+        assert branch_node.sub_nodes_keys == {"leaf": (Leaf, ANY_ARG)}
+
+    def test_non_introspectable_builtin_raises_resolution_error_with_stack(self):
+        """Signature introspection failure must surface as ResolutionError, not ValueError."""
+        graph = DependencyGraph(
+            "permissive",
+            BindingBox(),
+            implicit_creation_policy=ImplicitCreationPolicy(guard="none"),
+        )
+
+        with pytest.raises(ResolutionError, match="cannot introspect signature") as exc_info:
+            graph.build_node((str, ANY_ARG))
+
+        assert exc_info.value.resolution_stack == [(str, ANY_ARG)]
+
+    @pytest.mark.parametrize("resolution_mode", ["permissive", "semi-strict"])
+    def test_policy_denial_surfaces_as_resolution_error_with_stack(self, resolution_mode: ResolutionMode):
+        bindings = BindingBox()
+        bindings.bind(Branch)
+        policy = ImplicitCreationPolicy(guard="none")
+        policy.deny_type(Leaf, name="blocked leaf")
+        graph = DependencyGraph(resolution_mode, bindings, implicit_creation_policy=policy)
+
+        with pytest.raises(ResolutionError, match='denied by rule "blocked leaf"') as exc_info:
             graph.build_node((Branch, ANY_ARG))
 
         assert exc_info.value.resolution_stack == [(Branch, ANY_ARG), (Leaf, "leaf")]
+
+    def test_explicit_binding_bypasses_restrictive_policy(self):
+        policy = ImplicitCreationPolicy()
+        policy.deny_type(Leaf)
+        bindings = BindingBox()
+        bindings.bind(Leaf)
+        graph = DependencyGraph(
+            "permissive",
+            bindings,
+            implicit_creation_policy=policy,
+        )
+
+        assert graph.build_node((Leaf, ANY_ARG)).binding.name == "Leaf"
+
+    def test_policy_predicate_exception_is_not_laundered(self):
+        def broken_policy(_requested_type: type[Any]) -> bool:
+            raise TypeError("broken policy")
+
+        policy = ImplicitCreationPolicy()
+        policy.deny_if(broken_policy)
+        graph = DependencyGraph("permissive", BindingBox(), implicit_creation_policy=policy)
+
+        with pytest.raises(TypeError, match="broken policy"):
+            graph.build_node((Leaf, ANY_ARG))
 
 
 class DependencyGraphStrictModeTest:
@@ -261,6 +311,7 @@ def factory_with_type_specific_arg(t: type[Leaf]) -> Leaf:
 async def async_factory_with_type_arg(t: type[Leaf]) -> Leaf:
     return t("async_factory_with_type_arg")
 
+
 class DependencyGraphPredicateBindingsTest:
     @pytest.mark.parametrize(
         "factory",
@@ -282,3 +333,17 @@ class DependencyGraphPredicateBindingsTest:
         res = await leaf_node.binding.call_async()
         assert isinstance(res, Leaf)
         assert res.tag == factory.__name__
+
+    def test_factory_with_non_type_first_arg_is_not_specialized(self):
+        class FactoryDependency:
+            pass
+        # A predicate factory whose first parameter is a dependency (not a `type` argument)
+        def factory_with_dependency_arg(dependency: FactoryDependency) -> Leaf:
+            return Leaf("factory_with_dependency_arg")
+        bindings = BindingBox()
+        bindings.bind(lambda t: t is Leaf, factory_with_dependency_arg)
+        graph = DependencyGraph("permissive", bindings)
+
+        leaf_node = graph.build_node((Leaf, ANY_ARG))
+        # type argument is not bound, so it falls through to sub-dependency resolution
+        assert leaf_node.sub_nodes_keys == {"dependency": (FactoryDependency, ANY_ARG)}

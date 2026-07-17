@@ -1,5 +1,6 @@
 import re
 from contextlib import AbstractContextManager, asynccontextmanager
+from pathlib import Path
 from typing import Any, AsyncGenerator, AsyncIterator, no_type_check
 from unittest import mock
 from unittest.mock import MagicMock
@@ -7,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from attrs import define
 
-from dibox import BindingBox, DIBox, Injected, ResolutionMode
+from dibox import BindingBox, DIBox, ImplicitCreationPolicy, Injected, ResolutionError, ResolutionMode
 from dibox.binding_box import FactoryFunc
 from dibox.dimap import ANY_ARG, WildArgName, WildType
 
@@ -111,6 +112,23 @@ class DIBoxProvideTest:
         assert logger_args[0][0] == "Bar"
         assert logger_args[1][0] == "Foo"
 
+    async def test_default_implicit_creation_policy_forbids_value_types(self):
+        box = DIBox()
+
+        with pytest.raises(ResolutionError, match="denied by value-types guard"):
+            await box.provide(Path)
+
+    async def test_supplied_implicit_creation_policy_without_guard(self):
+        policy = ImplicitCreationPolicy(guard="none")
+        box = DIBox(implicit_creation_policy=policy)
+
+        await box.provide(Path)  # Should not raise, because guard is "none"
+
+    async def test_implicit_creation_policy_can_be_modified(self):
+        box = DIBox()
+        box.implicit_creation_policy.deny_type(Foo, name="boop")
+        with pytest.raises(ResolutionError, match="boop"):
+            await box.provide(Foo)
 
 class DIBoxGetTest:
     async def test_get_returns_instance_created_by_provide(self, resolution_mode: ResolutionMode):

@@ -5,6 +5,7 @@ from typing import Any, Awaitable, Callable, ClassVar, Self, TypeVar, overload
 from .binding_box import BindingBox, BindingMatch
 from .dependency_graph import DependencyGraph, ResolutionMode, WalkResult
 from .dimap import ANY_ARG, MatchAny, TypeQuery, WildArgName
+from .implicit_creation_policy import ImplicitCreationPolicy
 from .injector import Injector
 from .instance_box import InstanceBox
 from .resolution_stack import ResolutionStack, format_frame, format_resolution_path, format_type
@@ -27,13 +28,18 @@ class DIBox(BindingBox):
 
     _context_box: ClassVar[ContextVar["DIBox"]] = ContextVar("dibox")
 
-    def __init__(self, mode: ResolutionMode = "permissive") -> None:
+    def __init__(
+        self,
+        mode: ResolutionMode = "permissive",
+        implicit_creation_policy: ImplicitCreationPolicy | None = None,
+    ) -> None:
         self.instances = InstanceBox()
         self.injector = Injector(self)
         self.modules: list[BindingBox] = []
         self._context_token: Token["DIBox"] | None = None
         self._resolution_mode = mode
-        self._dependency_graph = DependencyGraph(mode, bindings=self)
+        self.implicit_creation_policy = implicit_creation_policy or ImplicitCreationPolicy()
+        self._dependency_graph = DependencyGraph(mode, bindings=self, implicit_creation_policy=self.implicit_creation_policy)
         super().__init__()
 
     @classmethod

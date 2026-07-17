@@ -7,7 +7,7 @@ This ADR isolates strict mode semantics and API.
 Related decisions:
 - [Implicit Self-Binding](./implicit_self_binding.md): read for the permissive fallback strict mode disables, and for why DIBox defaults to low-ceremony wiring.
 - [Semi-Strict Resolution](./semi_strict_mode.md): read when explicit root ownership is needed without binding every concrete transitive class.
-- [Zero-Dependency Guard](./zero_dependency_guard.md): read for the lightweight leaf-node guard used where implicit self-binding remains enabled.
+- [Implicit Creation Policy](./implicit_creation_policy.md): read for type eligibility where permissive or semi-strict modes allow implicit self-binding; strict mode bypasses it by disabling implicit binding.
 - [bind(...) API](./bind_api.md): read for registration forms (`bind(T)`, `bind_many(...)`) that keep strict-mode boilerplate manageable.
 - [Diagnostics and Introspection](./diagnostics.md): read for why a finite explicit graph improves validation, graph output, and failure locality.
 

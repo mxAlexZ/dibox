@@ -1,126 +1,82 @@
-# Package-aware auto-binding
+# Package scanning for bulk self-binding
 
-Related ADRs:
+Status: proposed concept, deferred. Scope is narrow: it applies only to strict mode. No implementation exists; treat any names here as descriptive placeholders, not committed API.
 
-- [binding_modules.md](binding_modules.md): `PackageBindingBox` would be a convenience for constructing a named `BindingBox` module.
-- [zero_dependency_guard.md](zero_dependency_guard.md): package scanning needs the same leaf-node safety filter as implicit self-binding.
-- [diagnostics.md](diagnostics.md): package ownership metadata feeds module-aware graph and cycle diagnostics.
+Related decisions:
+- [Implicit Creation Policy](./implicit_creation_policy.md): read first — its package-level allow rules give permissive and semi-strict modes on-demand implicit self-binding, so this scanning concept applies only where that policy does not: strict mode.
+- [Strict Mode](./strict_mode.md): read for the one mode where implicit self-binding is off, so bulk explicit registration is the only way to avoid per-class `bind()` calls.
+- [bind(...) API](./bind_api.md): read for `bind_many(...)`, the existing manual bulk-registration primitive this concept would automate.
+- [Binding modules](./binding_modules.md): read for `BindingBox`, the module unit any scanning helper would populate.
+- [Diagnostics and Introspection](./diagnostics.md): read for module-level cycle detection, which benefits from the clean type-to-package mapping scanning produces.
 
-## The boilerplate problem
+## 1. Problem
 
-Adding a new service class today involves four steps:
+Strict mode disables implicit self-binding, so every managed type must be explicitly
+registered. An application that wants strict-mode ownership and fail-fast resolution but owns
+dozens of concrete service classes must list each one in `bind()`/`bind_many(...)` and keep
+that list in sync by hand as classes are added and removed. The registration carries no
+information beyond "this concrete class exists and lives in this package," yet a missed entry
+is a silent gap in the managed graph.
 
-1. Write `class BillingService` in `billing/services.py`
-2. Re-export from `billing/__init__.py`
-3. Add to `__all__`
-4. `bindings.bind(BillingService)` in `deps.py`
+Permissive and semi-strict modes do not have this problem: `allow_package("my_app")` in the
+implicit creation policy makes every unbound concrete type under a package eligible for
+implicit self-binding on demand, lazily and without enumeration. Strict mode never consults
+that policy, so it has no equivalent relief. This concept exists only to close that strict-mode
+gap.
 
-Steps 2–4 carry no information: the class exists, it lives in the billing package,
-that's the entire intent. They exist only because the container doesn't know where to
-look.
+## 2. Concept: derive self-binds from package membership
 
-## The idea: `PackageBindingBox`
+Scan a package and emit an explicit self-bind for each owned concrete class, so package
+membership drives registration instead of a hand-maintained list. The output is ordinary
+explicit self-binds — the same effect as calling `bind(ServiceClass)` for each discovered
+class — so it stays fully compatible with strict mode's contract that only declared bindings
+resolve.
 
-A `BindingBox` subclass (or factory) that scans a Python package and auto-binds all
-service classes it finds there. The module name resolves automatically from the package.
+Selection stays a coarse package filter; it does not classify types by construction style.
+Excluding dataclasses, applying constructor-shape guards, or treating declarative classes as
+non-services are policy concerns that belong to the implicit creation policy as explicit
+allow/deny rules, not to hardcoded scan heuristics. Baking such guesses into scanning would
+duplicate that logic and contradict the policy's stance that construction style (dataclass,
+attrs, plain class) is not a semantic category.
 
-```python
-# billing/deps.py — the entire file
-from dibox import PackageBindingBox
-from billing import services, payment, storage  # imports trigger discovery
+## 3. Key tension: discovery timing
 
-bindings = PackageBindingBox(package="billing")
-# name="billing" is inferred; all service classes auto-bound
-```
+The hard problem is not filtering; it is knowing which classes exist. A scan can only see
+classes already imported when it runs. Packages that lazily import submodules — the common,
+well-behaved case — expose nothing to scan at that moment.
 
-Steps 2–4 collapse to zero. The developer writes a class, imports the submodule (which
-they likely already do), and the container picks it up.
+Two ways to resolve it, both with real costs:
 
-## Auto-binding criteria
+- Caller imports submodules first, then scans. Predictable and side-effect-free, but pushes
+  the completeness burden back onto the developer: a forgotten import silently drops a class,
+  reintroducing the very hand-sync drift scanning is meant to eliminate.
+- The scan eagerly walks and imports the whole package. Zero caller setup, but runs all
+  submodule import side effects at scan time and makes import errors harder to attribute to
+  their source.
 
-Not everything in a package is a service. The scan applies filters in order:
+Neither is clean, and this tension is the main reason the concept stays deferred rather than
+adopted. Eager scanning trades one maintenance hazard (forgotten bind calls) for another
+(surprising import-time execution).
 
-- **Concrete class**: exclude ABCs, Protocols, Enums — none of these should be
-  constructed by the container.
-- **Package ownership**: `cls.__module__.startswith(package_name)`. Filters out
-  third-party classes re-exported through the package (`from stripe import Gateway`
-  stays out; `stripe.__module__` is `"stripe.client"`, not `"billing"`).
-- **Dataclass exclusion**: `dataclasses.is_dataclass(cls)` — dataclasses are DTOs and
-  value objects, not services. Excluded by default with an opt-in to override.
-- **Zero-dep guard** (from `zero_dependency_guard.md`): skip any type where
-  `inspect.signature` shows no required parameters. These are value types —
-  `Path()`, config objects with all-default fields. The same guard that protects
-  `provide()` from silently constructing primitives protects package scanning from
-  binding those types.
-- **Public classes only**: skip names starting with `_`.
+## 4. Scope limits
 
-What remains after filtering is almost always exactly "the service classes."
+Scanning can only produce self-binds: requesting a concrete type constructs that same type.
+It cannot infer interface-to-implementation mappings; abstract and protocol dependencies still
+need explicit `bind(Interface, Implementation)`. So even with scanning, a strict-mode composition
+root keeps an explicit section for its abstract bindings, and scanning only removes the
+mechanical self-bind list.
 
-## What auto-binding can and cannot do
+Selection should be explicit rather than heuristic. If scanning is pursued, exclusions belong
+to the caller (name a type to skip, or supply a predicate), not to built-in guesses about which
+classes are "services." This keeps the mechanism aligned with implicit creation policy: package
+membership is a coarse selector, and anything finer is an explicit user rule.
 
-Auto-binding can only produce **self-binds**: `bind(BillingService)` — requesting
-`BillingService` constructs `BillingService`. It cannot know that `PaymentGateway`
-should resolve to `StripeGateway`. Abstract types and interface-to-implementation
-mappings still need explicit `bind()` calls in the same box.
+## 5. Open questions
 
-```python
-# billing/deps.py
-bindings = PackageBindingBox(package="billing")
-bindings.bind(PaymentGateway, StripeGateway)   # explicit — auto-bind can't infer this
-```
-
-## Discovery timing
-
-`PackageBindingBox` can only see classes that are already imported at the moment it is
-constructed. If `billing` lazily imports its submodules (very common), those classes
-won't be visible yet.
-
-**Option A: caller imports submodules first (recommended default)**
-```python
-from billing import services, payment   # explicit — developer controls what's scanned
-bindings = PackageBindingBox(package="billing")
-```
-Simple, predictable, no magic. The imports are usually already present in well-organised
-packages.
-
-**Option B: eager scan via `pkgutil.walk_packages` (opt-in)**
-```python
-bindings = PackageBindingBox(package="billing", scan_all=True)
-```
-The box imports all submodules itself during construction. Zero-setup for the caller,
-but has side effects: all submodule code runs at `BindingBox` construction time, which
-may be surprising and makes import errors harder to attribute.
-
-## The DTO / dataclass false-positive problem
-
-`@dataclass class Invoice(items: list[LineItem], total: Decimal)` lives in the billing
-package, is concrete, has required fields — it passes all filters except the dataclass
-exclusion. Without that check, requesting `Invoice` would trigger an attempt to resolve
-`list[LineItem]` and `Decimal`, both of which would fail or produce nonsense.
-
-The dataclass exclusion is the primary guard. Additional mitigations:
-- `_` prefix convention — `_Invoice` is skipped.
-- Explicit exclusion: `bindings.exclude(Invoice)`.
-- Accept that it fails loudly at `validate()` or first `provide()` rather than
-  silently, so the developer gets a clear error pointing at the misconfigured type.
-
-The zero-dep guard already catches the simpler case: `@dataclass class Config` with
-all-default fields is skipped by it. Required-field dataclasses are the residual gap
-that the dataclass check closes.
-
-## Caveats summary
-
-| Issue | Impact | Mitigation |
-|---|---|---|
-| Lazy submodule imports | Classes missed at scan time | Import submodules before constructing the box (Option A) |
-| Dataclasses with required fields | Auto-bound but unresolvable | Exclude `dataclasses.is_dataclass()` by default |
-| Abstract types need explicit bind | No change from today | Explicit `bind()` in the same box |
-| pyright can't verify auto-bound types | No static error if type is unresolvable | `provide(BillingService)` is still typed; auto-binding is a resolution convenience, not a type system extension |
-
-## Relationship to module-level cycle detection
-
-`PackageBindingBox` provides the most natural `name=` value and the tightest
-type-to-module mapping possible: `cls.__module__` directly encodes package membership
-with no heuristics. This makes it the ideal input for the module-level cycle detection
-described in `diagnostics.md`: no ambiguity about which module a type belongs to,
-no manual attribution needed.
+- Is the strict-mode bulk-registration pain real enough to justify a scanning mechanism, or is
+  a maintained `bind_many(...)` list an acceptable and more explicit cost?
+- Could the same relief come from a smaller feature — for example, a helper that lists concrete
+  classes in already-imported modules for the caller to pass to `bind_many(...)` — keeping
+  discovery explicit and avoiding import-time side effects entirely?
+- If adopted, what module name and grouping would the scanned bindings carry, and how does that
+  feed the type-to-package mapping module-level cycle detection wants?

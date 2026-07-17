@@ -5,6 +5,7 @@ from typing import Any, Generator, Literal, NamedTuple, Protocol, cast, get_orig
 from .binding_box import BindingMatch
 from .binding_record import BindingRecord
 from .dimap import ANY_ARG, DIMap, DIMapKey, TypeQuery, WildArgName
+from .implicit_creation_policy import ImplicitCreationPolicy
 from .resolution_error import ResolutionError
 from .resolution_stack import ResolutionStack
 
@@ -38,12 +39,18 @@ class WalkResult(NamedTuple):
 
 class DependencyGraph:
     """Internal graph builder for dependency resolution."""
-    def __init__(self, mode: ResolutionMode, bindings: BindingLookup) -> None:
+    def __init__(
+        self,
+        mode: ResolutionMode,
+        bindings: BindingLookup,
+        implicit_creation_policy: ImplicitCreationPolicy | None = None,
+    ) -> None:
         if mode not in ("permissive", "strict", "semi-strict"):
             raise ValueError(f"Invalid resolution mode: {mode}")
         self._resolution_mode: ResolutionMode = mode
         self._node_map = DIMap[GraphNode]()
         self._bindings = bindings
+        self._implicit_creation_policy = implicit_creation_policy or ImplicitCreationPolicy()
         self._is_closed = False
 
 
@@ -96,7 +103,11 @@ class DependencyGraph:
         resolution_stack.append(node_query)
         try:
             binding_record, map_position = self._create_binding(node_query, resolution_stack)
-            dependencies = self._get_dependencies_from_signature(binding_record.signature)
+            try:
+                sig = binding_record.signature
+            except ValueError as exc:
+                raise ResolutionError(f"cannot introspect signature: {exc}", resolution_stack) from exc
+            dependencies = self._get_dependencies_from_signature(sig)
             sub_nodes_links: dict[str, NodeKey] = {}
             sub_nodes: list[GraphNode] = []
             for sub_node_query in dependencies:
@@ -139,23 +150,14 @@ class DependencyGraph:
         requested_type: TypeQuery[Any],
         resolution_stack: ResolutionStack,
     ) -> tuple[BindingRecord, type[Any]]:
-        if not isinstance(requested_type, type):
-            raise ResolutionError("requested type is not a concrete class", resolution_stack)
-        try:
-            signature = inspect.signature(requested_type, eval_str=True)
-            # Zero-dependency guard: require at least one required constructor parameter
-            # to prevent silent leaf node creation.
-            if not any(
-                parameter.default == inspect.Parameter.empty
-                and parameter.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
-                for parameter in signature.parameters.values()
-            ):
-                raise ResolutionError("type without required parameters needs explicit binding", resolution_stack)
-        except (ValueError, TypeError):
-            raise ResolutionError("requested type is not a concrete class", resolution_stack) from None
+        decision = self._implicit_creation_policy.decide(requested_type)
+        if not decision.allowed:
+            raise ResolutionError(f"implicit creation {decision.reason}", resolution_stack)
+        # The policy rejects non-types before evaluating configurable rules.
+        concrete_type = cast(type[Any], requested_type)
         return (
-            BindingRecord(requested_type),
-            requested_type,
+            BindingRecord(concrete_type),
+            concrete_type,
         )
 
     @staticmethod

@@ -1,6 +1,6 @@
 # Zero-Dependency Guard
 
-Status: proposed
+Status: superseded by [Implicit Creation Policy](./implicit_creation_policy.md).
 
 Related decisions:
 - [Implicit Self-Binding](./implicit_self_binding.md): mechanism and mode boundaries this guard restricts.
@@ -22,20 +22,22 @@ Explicit `box.bind(Type)` bypasses the guard by declaring default construction a
 
 The guard targets types that need explicit user intent:
 
-- Configuration and secrets: `str`, `int`, `list`, `dict`, `Path`, `api_key`, `db_url`.
+- Introspectable zero-dep types where default construction is semantically wrong: `Path()` produces `Path('.')`, `list()` produces `[]`, all-default user-defined classes silently use policy-level defaults.
 - All-default services where defaults are policy: `RateLimiter(rps=100, burst=200)`.
 - External resources needing configuration or lifecycle ownership: clients, pools, connections.
 
-- `AppConfig(db_url: str)` fails at the blocked `str` leaf instead of silently becoming `AppConfig(db_url="")`.
-- `RateLimiter(rps=100, burst=200)` requires `box.bind(RateLimiter)`.
+- `RateLimiter(rps=100, burst=200)` requires `box.bind(RateLimiter)` because it has no required parameters.
 - `UserService(db: Database, cache: Cache)` still self-binds because the container resolves real dependencies.
+
+Note: C builtins like `str` and `int` are non-introspectable on CPython — they cannot be silently auto-created because signature inspection raises an error first. For those types the guard provides a semantically clearer error, not protection against silent injection.
 
 Interface or protocol choice remains a separate explicit-binding problem; ZDG does not choose implementations.
 
 ## 4. Trade-offs
 
 Benefits:
-- Blocks a common silent-failure class: primitives and all-default service classes.
+- Blocks silent injection of introspectable zero-dep types (`Path`, `list`, all-default services).
+- For non-introspectable builtins, surfaces a semantically meaningful error instead of a raw introspection failure.
 - Improves error locality at missing-value leaves.
 - Keeps bypass low-cost and explicit: `box.bind(Type)`.
 
