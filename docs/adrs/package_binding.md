@@ -1,40 +1,38 @@
-# Package scanning for bulk self-binding
+# Package scanning for explicit self-bindings
 
-Status: proposed concept, deferred. Scope is narrow: it applies only to strict mode. No implementation exists; treat any names here as descriptive placeholders, not committed API.
+Status: proposed concept, deferred. No implementation exists; treat any names here as descriptive placeholders, not committed API.
 
 Related decisions:
-- [Implicit Creation Policy](./implicit_creation_policy.md): read first — its package-level allow rules give permissive and semi-strict modes on-demand implicit self-binding, so this scanning concept applies only where that policy does not: strict mode.
-- [Strict Mode](./strict_mode.md): read for the one mode where implicit self-binding is off, so bulk explicit registration is the only way to avoid per-class `bind()` calls.
+- [Missing-Binding Policy](./missing_binding_policy.md): package allow rules authorize lazy transitive construction without creating explicit bindings; scanning serves a different need.
 - [bind(...) API](./bind_api.md): read for `bind_many(...)`, the existing manual bulk-registration primitive this concept would automate.
 - [Binding modules](./binding_modules.md): read for `BindingBox`, the module unit any scanning helper would populate.
 - [Diagnostics and Introspection](./diagnostics.md): read for module-level cycle detection, which benefits from the clean type-to-package mapping scanning produces.
 
 ## 1. Problem
 
-Strict mode disables implicit self-binding, so every managed type must be explicitly
-registered. An application that wants strict-mode ownership and fail-fast resolution but owns
-dozens of concrete service classes must list each one in `bind()`/`bind_many(...)` and keep
-that list in sync by hand as classes are added and removed. The registration carries no
-information beyond "this concrete class exists and lives in this package," yet a missed entry
-is a silent gap in the managed graph.
+Package allow rules already solve low-boilerplate transitive wiring: matching concrete classes
+can be constructed lazily without enumeration or explicit registration. Scanning is relevant
+only when an application wants package membership to emit real bindings — for example, to make
+every discovered class an explicit root or to expose a finite binding set to diagnostics and
+module tooling.
 
-Permissive and semi-strict modes do not have this problem: `allow_package("my_app")` in the
-implicit creation policy makes every unbound concrete type under a package eligible for
-implicit self-binding on demand, lazily and without enumeration. Strict mode never consults
-that policy, so it has no equivalent relief. This concept exists only to close that strict-mode
-gap.
+Maintaining that set through `bind()` or `bind_many(...)` couples the composition root to every
+class and can drift as a package changes. Deriving bindings from package membership removes the
+hand-maintained list, but also makes every discovered class part of the explicit container
+surface. That widening is justified only when the package itself is intended to be an ownership
+boundary; it is not a general replacement for selective root declarations.
 
 ## 2. Concept: derive self-binds from package membership
 
 Scan a package and emit an explicit self-bind for each owned concrete class, so package
 membership drives registration instead of a hand-maintained list. The output is ordinary
 explicit self-binds — the same effect as calling `bind(ServiceClass)` for each discovered
-class — so it stays fully compatible with strict mode's contract that only declared bindings
-resolve.
+class. Each discovered class therefore bypasses missing-binding policy, can be requested as a
+root, and becomes enumerable as binding metadata.
 
 Selection stays a coarse package filter; it does not classify types by construction style.
 Excluding dataclasses, applying constructor-shape guards, or treating declarative classes as
-non-services are policy concerns that belong to the implicit creation policy as explicit
+non-services are policy concerns that belong to the missing-binding policy as explicit
 allow/deny rules, not to hardcoded scan heuristics. Baking such guesses into scanning would
 duplicate that logic and contradict the policy's stance that construction style (dataclass,
 attrs, plain class) is not a semantic category.
@@ -62,19 +60,18 @@ adopted. Eager scanning trades one maintenance hazard (forgotten bind calls) for
 
 Scanning can only produce self-binds: requesting a concrete type constructs that same type.
 It cannot infer interface-to-implementation mappings; abstract and protocol dependencies still
-need explicit `bind(Interface, Implementation)`. So even with scanning, a strict-mode composition
-root keeps an explicit section for its abstract bindings, and scanning only removes the
-mechanical self-bind list.
+need explicit `bind(Interface, Implementation)`. Scanning only removes a mechanical concrete
+self-bind list.
 
 Selection should be explicit rather than heuristic. If scanning is pursued, exclusions belong
 to the caller (name a type to skip, or supply a predicate), not to built-in guesses about which
-classes are "services." This keeps the mechanism aligned with implicit creation policy: package
+classes are "services." This keeps the mechanism aligned with the missing-binding policy: package
 membership is a coarse selector, and anything finer is an explicit user rule.
 
 ## 5. Open questions
 
-- Is the strict-mode bulk-registration pain real enough to justify a scanning mechanism, or is
-  a maintained `bind_many(...)` list an acceptable and more explicit cost?
+- Is explicit package-wide root access or enumeration common enough to justify scanning, or is
+  a maintained `bind_many(...)` list an acceptable and more deliberate cost?
 - Could the same relief come from a smaller feature — for example, a helper that lists concrete
   classes in already-imported modules for the caller to pass to `bind_many(...)` — keeping
   discovery explicit and avoiding import-time side effects entirely?

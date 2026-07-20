@@ -26,7 +26,7 @@ Resolution searches binding rules in this order:
 
 1. direct bindings on the `DIBox` instance,
 2. added modules in reverse registration order,
-3. implicit self-binding, depending on resolution mode.
+3. implicit self-binding when the missing-binding policy authorizes it.
 
 Direct container bindings are the most explicit composition-root signal and always win.
 Among modules, last-registered wins. This makes layered composition possible without

@@ -287,15 +287,13 @@ class BindingBoxTest:
         binding_match = box.find_binding(requested_type, request_arg)
 
         assert binding_match is not None
-        binding, (matched_type, matched_arg), via_predicate = binding_match
         try:
-            tag = binding.call_sync().tag
+            tag = binding_match.binding.call_sync().tag
         except TypeError:
-            tag = binding.call_sync(requested_type).tag
+            tag = binding_match.binding.call_sync(requested_type).tag
         assert tag == expected_tag
-        assert matched_type == expected_matched_type
-        assert matched_arg == expected_matched_arg
-        assert via_predicate == expected_via_predicate
+        assert binding_match.key == (expected_matched_type, expected_matched_arg)
+        assert binding_match.via_predicate == expected_via_predicate
 
     def test_find_binding_returns_none_when_no_match(self):
         box = BindingBox()

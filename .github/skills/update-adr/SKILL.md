@@ -33,7 +33,7 @@ Four ideas drive every rule below. If an edit violates one, it is wrong even if 
   - "the original/previous/old draft", "we changed", "used to", "replaced X with" → the doc is narrating its own history. Delete the narration; state what is.
   - "Replace X with Y" / "Add Y" as a section's main verb (for work already done) → describe Y as the current design, not as an action to perform.
 - Examples (from real fixes):
-  - Bad: "Replace the hard-coded guard with an implicit creation policy." Good: "DIBox governs implicit creation with an explicit policy rather than a fixed guard."
+  - Bad: "Replace the hard-coded guard with a missing-binding policy." Good: "DIBox governs missing bindings with one policy rather than overlapping controls."
   - Bad: "The API should cover package ownership." Good: "The API covers package ownership."
   - Bad: "The original draft framed scanning as the answer to boilerplate." Good: "Strict mode requires every managed type to be explicitly registered."
 - Exception: genuinely future or proposed work stays in future tense, and a rejected-alternative note stays as a note — but label it as such, and keep it only if it still guides a decision.

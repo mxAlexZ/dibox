@@ -1,17 +1,17 @@
 import inspect
 from collections.abc import Mapping
-from typing import Any, Generator, Literal, NamedTuple, Protocol, cast, get_origin
+from dataclasses import dataclass
+from typing import Any, Generator, Protocol, cast, get_origin
 
 from .binding_box import BindingMatch
 from .binding_record import BindingRecord
 from .dimap import ANY_ARG, DIMap, DIMapKey, TypeQuery, WildArgName
-from .implicit_creation_policy import ImplicitCreationPolicy
+from .missing_binding_policy import MissingBindingPolicy, PolicyPreset
 from .resolution_error import ResolutionError
 from .resolution_stack import ResolutionStack
 
 NodeKey = DIMapKey[Any]
 NodeQuery = tuple[TypeQuery[Any], WildArgName]
-ResolutionMode = Literal["permissive", "strict", "semi-strict"]
 
 
 class BindingLookup(Protocol):
@@ -23,14 +23,16 @@ class BindingLookup(Protocol):
         ...
 
 
-class GraphNode(NamedTuple):
+@dataclass(slots=True)
+class GraphNode:
     key: DIMapKey[Any]
     binding: BindingRecord
     sub_nodes: list["GraphNode"]
     sub_nodes_keys: dict[str, NodeKey]
 
 
-class WalkResult(NamedTuple):
+@dataclass(slots=True)
+class WalkResult:
     node_key: NodeKey
     binding: BindingRecord
     dependencies: dict[str, NodeKey]
@@ -41,18 +43,15 @@ class DependencyGraph:
     """Internal graph builder for dependency resolution."""
     def __init__(
         self,
-        mode: ResolutionMode,
         bindings: BindingLookup,
-        implicit_creation_policy: ImplicitCreationPolicy | None = None,
+        policy: MissingBindingPolicy | PolicyPreset = "open",
     ) -> None:
-        if mode not in ("permissive", "strict", "semi-strict"):
-            raise ValueError(f"Invalid resolution mode: {mode}")
-        self._resolution_mode: ResolutionMode = mode
+        if isinstance(policy, MissingBindingPolicy):
+            self.policy = policy
+        else:
+            self.policy = MissingBindingPolicy.from_preset(policy)
         self._node_map = DIMap[GraphNode]()
         self._bindings = bindings
-        self._implicit_creation_policy = implicit_creation_policy or ImplicitCreationPolicy()
-        self._is_closed = False
-
 
     def build_node(self, node_query: NodeQuery) -> GraphNode:
         """Build and cache the dependency graph for node_query.
@@ -106,6 +105,8 @@ class DependencyGraph:
             try:
                 sig = binding_record.signature
             except ValueError as exc:
+                # Some built-in, C-extension, or dynamically generated callables expose no
+                # signature metadata
                 raise ResolutionError(f"cannot introspect signature: {exc}", resolution_stack) from exc
             dependencies = self._get_dependencies_from_signature(sig)
             sub_nodes_links: dict[str, NodeKey] = {}
@@ -121,7 +122,6 @@ class DependencyGraph:
             resolution_stack.pop()
 
     def _create_binding(self, node_query: NodeQuery, resolution_stack: ResolutionStack) -> tuple[BindingRecord, NodeKey]:
-        # binding_record, map_position = self._bindings.find_binding(*node_query)
         binding_match = self._bindings.find_binding(*node_query)
         if binding_match is not None:
             binding_record = binding_match.binding
@@ -129,28 +129,18 @@ class DependencyGraph:
                 # for predicate-based binding, make a specialized binding record with bound constructed type.
                 binding_record = self._bind_factory_type_argument(binding_match.key[0], binding_record)
             return binding_record, binding_match.key
-        if not self._implicit_binding_allowed(resolution_stack):
-            raise ResolutionError("no binding found", resolution_stack)
         implicit_binding, matched_type = self._make_implicit_binding_record(node_query[0], resolution_stack)
         implicit_binding.name = f"{implicit_binding.name} (implicit)"
         node_position = (matched_type, ANY_ARG)
         return implicit_binding, node_position
-
-    def _implicit_binding_allowed(self, resolution_stack: ResolutionStack) -> bool:
-        match self._resolution_mode:
-            case "strict":
-                return False
-            case "semi-strict":
-                return len(resolution_stack) > 1
-            case _:
-                return True
 
     def _make_implicit_binding_record(
         self,
         requested_type: TypeQuery[Any],
         resolution_stack: ResolutionStack,
     ) -> tuple[BindingRecord, type[Any]]:
-        decision = self._implicit_creation_policy.decide(requested_type)
+        is_root = len(resolution_stack) == 1
+        decision = self.policy.decide(requested_type, is_root)
         if not decision.allowed:
             raise ResolutionError(f"implicit creation {decision.reason}", resolution_stack)
         # The policy rejects non-types before evaluating configurable rules.

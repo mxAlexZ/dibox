@@ -1,10 +1,11 @@
 # Entrypoints
 
-**Status**: Partially Implemented (declarative); Proposed (imperative)
+Status: partially implemented (declarative); proposed (imperative)
 
 This document describes the different ways to trigger dependency injection in DIBox.
 
--   See also: [Strict Mode](./strict_mode.md) (for explicit-binding behavior), [Implicit Self-Binding](./implicit_self_binding.md) (for permissive fallback and guardrails).
+- [Missing-Binding Policy](./missing_binding_policy.md): defines which unbound requests each entrypoint may resolve.
+- [Implicit Self-Binding](./implicit_self_binding.md): defines construction of authorized unbound concrete classes.
 
 ---
 
@@ -55,7 +56,7 @@ async def get_system_config(config: Injected[AppConfig]) -> dict:
 
 ### 1.3. Advanced: The `Injector` Object
 
-For large applications, it can be useful to centralize injection policy for a specific architectural domain (e.g., `admin_api`, `public_api`). The `Injector` object serves this purpose.
+For large applications, it can be useful to centralize container selection for a specific architectural domain (e.g., `admin_api`, `public_api`). The `Injector` object serves this purpose.
 
 ```python
 # Reusable policy for all admin routes
@@ -65,13 +66,15 @@ admin_api = Injector(container_resolver=DIBox.from_context)
 async def create_user(...): ...
 ```
 
-However, for most use cases, `@inject` is simpler and sufficient. `Injector` was originally conceived to solve problems that the modern context-aware `@inject` now handles automatically. It remains a useful tool for enforcing strict architectural layers but can be considered an advanced feature rather than a primary recommendation.
+However, for most use cases, `@inject` is simpler and sufficient. `Injector` was originally conceived to solve problems that the modern context-aware `@inject` now handles automatically. It remains useful when container selection must be customized, but is an advanced feature rather than the primary recommendation.
 
 ---
 
 ## 2. Imperative Entrypoints: Direct Execution
 
 Imperative entrypoints are for scenarios where you have a container instance in hand and want to directly execute a function with dependencies. They are the ideal tool for scripting, orchestration, and single-shot execution contexts.
+
+`call()` and `partial()` are accepted designs but are not yet implemented.
 
 Unlike decorators, they do not require `Injected[T]` markers. They inspect the function's signature and fill any parameter the container can provide.
 
@@ -108,20 +111,8 @@ bound_processor(source_url="s3://...")
 
 -   Use Case: Preparing DI-injected callbacks for systems that are not DI-aware (e.g., schedulers, event buses).
 
-### 2.3. A Note on Resolution Strategy
+### 2.3. Missing-binding policy
 
-The power of imperative entrypoints is also their biggest risk, and their behavior is highly dependent on the container's resolution mode.
+Imperative entrypoints reuse the container's missing-binding policy rather than define separate resolution controls. Their contract is to fill each parameter the policy authorizes and leave the rest caller-supplied. Each parameter is a request-boundary root, so a policy that requires explicit root bindings makes the injection boundary exact and reviewable from the container's bindings. A policy that permits implicit roots may also fill constructable annotations without prior registration.
 
--   In permissive mode (the default), `call()` is extremely convenient for quick scripts. It will attempt to construct any dependency, which minimizes boilerplate. However, a missing binding can lead to silent misconfigurations.
-
--   In strict and semi-strict mode, `call()` becomes a safe and predictable tool. It will only inject explicitly bound dependencies, failing immediately if something is missing. This is the recommended approach when using well-defined binding modules, as it guarantees that your function is receiving exactly the dependencies you have configured.
-
-The choice allows you to trade convenience for safety. For a quick, one-off script, the permissive default may be fine. For robust, production-grade orchestration, strict mode is strongly recommended.
-
-## 3. Interaction with Resolution Modes
-
-The selected resolution mode applies uniformly to all entrypoints, ensuring consistent behavior. See [Strict Mode](./strict_mode.md) for strict semantics, [Implicit Self-Binding](./implicit_self_binding.md) for permissive fallback, and [Implicit Creation Policy](./implicit_creation_policy.md) for type eligibility within implicit-binding mode boundaries.
-
--   Strict mode: Only explicitly bound types are resolved. All entrypoints will raise an error for unbound types.
--   Semi-strict mode: Resolution roots must be explicitly bound, while unbound transitive concrete dependencies may still be implicitly self-bound.
--   Permissive mode (default): Implicit self-binding is used for unbound concrete types permitted by the implicit creation policy. This is convenient but carries risk, especially for imperative entrypoints.
+Declarative injection follows the same root semantics for each `Injected[T]` parameter. Explicitly supplied keyword arguments override injection in both entrypoint styles.

@@ -14,25 +14,22 @@ ADRs that define the ecosystem and guiding principles. Read first when onboardin
 
 ## Binding
 How dependencies are declared, registered, and organized into modules.
- - [bind_api.md](bind_api.md): `bind(...)` argument forms, `bind_many`, generator/contextmanager factory support, rejected fluent APIs
- - [binding_modules.md](binding_modules.md): implemented `BindingBox` modules via `add_bindings`; composition-root grouping, module precedence
- - [package_binding.md](package_binding.md): deferred concept for scanning a package to emit bulk explicit self-binds; scoped to strict mode only, since implicit creation policy `allow_package` already covers permissive/semi-strict; key tension is discovery timing (lazy imports vs eager-scan import side effects)
+ - [bind_api.md](bind_api.md): `bind(...)` argument forms, explicit self-binds and roots, `bind_many`, generator/contextmanager factories, rejected fluent APIs
+ - [binding_modules.md](binding_modules.md): implemented `BindingBox` modules via `add_bindings`; composition-root grouping, direct/module/implicit precedence, no instance or lifetime ownership
+ - [package_binding.md](package_binding.md): deferred package scanning for enumerable explicit self-binds and package-wide root access; discovery completeness versus eager-import side effects
  - [named_bindings.md](named_bindings.md): argument-name matching as default, `Annotated` + `Named`/`Token` as explicit override, `NewType` alternative, third-party integration pattern
 
 ## Resolution & Runtime
 How the container resolves dependencies, manages instance lifetimes, and exposes injection entrypoints.
- - [implicit_self_binding.md](implicit_self_binding.md): implicit self-binding as shared permissive/semi-strict mechanism for zero-config concrete graph internals; permissive onboarding defaults, semi-strict root-boundary mitigation, open-graph risks
- - [implicit_creation_policy.md](implicit_creation_policy.md): implicit self-binding eligibility for unbound concrete types in permissive/semi-strict resolution; allow and deny rules match packages, exact types, or arbitrary predicates, with deny precedence; fallback guards handle unruled types: `"value-types"` defaults to blocking known values, `"zero-dependency"` blocks zero-arg constructors, and `"deny-all"` creates strict allowlists
- - [zero_dependency_guard.md](zero_dependency_guard.md): earlier proposed hard-coded guard for zero-required-arg leaf types; predecessor context for implicit creation policy
- - [strict_mode.md](strict_mode.md): strict-mode explicit-binding contract, fail-fast semantics, migration path from permissive defaults
- - [entrypoints.md](entrypoints.md): `@inject` + contextvar container resolution, `Injected[T]` + signature rewriting, `container.call()`/`partial()`, `Injector`, mode-dependent behavior
- - [semi_strict_mode.md](semi_strict_mode.md): implemented middle mode (explicit roots + implicit transitive expansion), with open introspection-surface questions and optional safety-filter follow-ups
- - [scopes.md](scopes.md): `DIBox(parent=...)` nesting as scope primitive, instance ownership/shadowing rules, binding modules inside scopes, contextvar-based `@inject`, why `scope=` on `bind()` was rejected
+ - [implicit_self_binding.md](implicit_self_binding.md): constructor-derived self-bindings for unbound concrete classes; recursive annotated dependencies, explicit-binding precedence, and limits of inferred recipes
+ - [missing_binding_policy.md](missing_binding_policy.md): canonical missing-binding authorization; root/transitive defaults, `"open"`/`"explicit-roots"`/`"closed"` presets, type/package/predicate rules, cached-boundary limitation
+ - [entrypoints.md](entrypoints.md): implemented `@inject`, `Injected[T]`, contextvar and fixed-container selection; proposed `call()`/`partial()` reuse policy root semantics per parameter
+ - [scopes.md](scopes.md): `DIBox(parent=...)` nesting as scope primitive, instance ownership/shadowing rules, binding modules inside scopes, contextvar-based `@inject`, why `scope=` on `bind()` was rejected; open problem: placement of implicitly created instances (binding = recipe + ownership + placement, lifetime invariant, candidate rules incl. container-local lean, policy locality/inheritance)
  - [scopes_sketch.py](scopes_sketch.py): pipeline/Ray scope scenarios, app-run-stage nesting, `container.call()`, module reuse
  - [factories.md](factories.md): proposal for call-time factory args and container-aware factories for dynamic/context-driven dependency creation
  - [sync_async.md](sync_async.md): sync mode current limitation (`get()` only), proposed `provide_sync()` and sync factory behavior
 
 ## Developer Experience
 Tools for debugging, validation, and observability.
- - [diagnostics.md](diagnostics.md): implemented resolution stack errors, proposed cycle detection, `validate()`/`graph()`, module-aware diagnostics, module-level dependency cycles
- - [dependency_graph.md](dependency_graph.md): separation of resolution logic from `DIBox` hub; `DependencyGraph` owns binding lookup, signature introspection, traversal, and mode enforcement; `BindingLookup` protocol; sync-resolution vs async-materialisation split; planned dual traversal behaviors (fail-fast vs collect-all); deferred graph sharing across scope boundaries
+ - [diagnostics.md](diagnostics.md): implemented resolution-path errors; proposed cycle detection, `validate()`/`graph()`, explicit/open/predicate root enumeration boundaries, module-aware diagnostics
+ - [dependency_graph.md](dependency_graph.md): compiled binding context owned outside the `DIBox` hub; binding lookup, signature introspection, policy evaluation, cached traversal, fail-fast/collect-all plans, cached-root limitation

@@ -1,13 +1,13 @@
 import logging
 from contextvars import ContextVar, Token
-from typing import Any, Awaitable, Callable, ClassVar, Self, TypeVar, overload
+from typing import Any, Callable, ClassVar, Self, TypeVar, overload
 
 from .binding_box import BindingBox, BindingMatch
-from .dependency_graph import DependencyGraph, ResolutionMode, WalkResult
+from .dependency_graph import DependencyGraph, WalkResult
 from .dimap import ANY_ARG, MatchAny, TypeQuery, WildArgName
-from .implicit_creation_policy import ImplicitCreationPolicy
 from .injector import Injector
 from .instance_box import InstanceBox
+from .missing_binding_policy import MissingBindingPolicy, PolicyPreset
 from .resolution_stack import ResolutionStack, format_frame, format_resolution_path, format_type
 
 _T = TypeVar("_T")
@@ -30,16 +30,13 @@ class DIBox(BindingBox):
 
     def __init__(
         self,
-        mode: ResolutionMode = "permissive",
-        implicit_creation_policy: ImplicitCreationPolicy | None = None,
+        policy: MissingBindingPolicy | PolicyPreset = "open",
     ) -> None:
         self.instances = InstanceBox()
         self.injector = Injector(self)
         self.modules: list[BindingBox] = []
         self._context_token: Token["DIBox"] | None = None
-        self._resolution_mode = mode
-        self.implicit_creation_policy = implicit_creation_policy or ImplicitCreationPolicy()
-        self._dependency_graph = DependencyGraph(mode, bindings=self, implicit_creation_policy=self.implicit_creation_policy)
+        self._dependency_graph = DependencyGraph(bindings=self, policy=policy)
         super().__init__()
 
     @classmethod
@@ -53,6 +50,10 @@ class DIBox(BindingBox):
             return cls._context_box.get()
         except LookupError:
             raise RuntimeError("No active container — use 'async with box:' first")
+
+    @property
+    def policy(self) -> MissingBindingPolicy:
+        return self._dependency_graph.policy
 
     def add_bindings(self, binding_box: BindingBox) -> None:
         """Registers a reusable binding module (`BindingBox`) on this container.
@@ -92,14 +93,12 @@ class DIBox(BindingBox):
         """
         return self.injector.inject(func)
 
-    @overload
-    def call(self, func: Callable[..., Awaitable[_R]], *args: Any, **kwargs: Any) -> Awaitable[_R]: ...
-    @overload
-    def call(self, func: Callable[..., _R], *args: Any, **kwargs: Any) -> _R: ...
-    def call(self, func: Any, *args: Any, **kwargs: Any) -> Any:
-        # Todo: see the design eps - we can apply injection without markers
-        # since we have access to all bindings.
-        raise NotImplementedError("call() method is not implemented yet.")
+    # @overload
+    # def call(self, func: Callable[..., Awaitable[_R]], *args: Any, **kwargs: Any) -> Awaitable[_R]: ...
+    # @overload
+    # def call(self, func: Callable[..., _R], *args: Any, **kwargs: Any) -> _R: ...
+    # def call(self, func: Any, *args: Any, **kwargs: Any) -> Any:
+    #     raise NotImplementedError("call() method is not implemented yet.")
 
     @overload
     async def provide(self, requested_type: MatchAny, arg_name: str) -> Any: ...

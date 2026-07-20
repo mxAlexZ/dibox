@@ -9,7 +9,6 @@ This means either:
 - Or everything becomes effectively a singleton, which is incorrect for stateful, context-bound dependencies.
 
 A scope mechanism should let the framework manage these lifetimes correctly, while keeping the developer's code focused on business logic rather than container plumbing.
-˘
 
 ## Key problems to solve
 - how do we define what a "scope" is?
@@ -64,7 +63,7 @@ The module is reusable binding configuration. It does not own the lifetime bound
 does not need to know whether it is added to an app, request, job, or pipeline-stage
 container.
 
-Note: We currently have an internal concept of "instance box" which is where resolved instances live. In the nesting design, we can either keep this 1-1 relationship (each container has one instance box) or allow multiple instance boxes per container (e.g. one per scope). Alteratively to the example above, parent and child relationship can be implemented between instance boxes instead of diboxes; the latter would manage the bindings and the scopes. We need to explore this further.
+Note: We currently have an internal concept of "instance box" which is where resolved instances live. In the nesting design, we can either keep this 1-1 relationship (each container has one instance box) or allow multiple instance boxes per container (e.g. one per scope). Alternatively to the example above, parent and child relationship can be implemented between instance boxes instead of diboxes; the latter would manage the bindings and the scopes. We need to explore this further.
 
 ### Resolution rules
 
@@ -92,7 +91,25 @@ Open question: if the parent has a binding for `DatabasePool` but hasn't created
 
 Suggested rule: the container that holds the binding owns the instance. If the binding lives in the parent, the instance is created in and owned by the parent, even if the first `provide()` call happens through a child. Auto-wired types with no explicit binding are owned by the container that triggered the resolution. This ensures the instance outlives the child, which is the expected behavior for app-level dependencies.
 
-Alternatively, stronger isolation can be implmented - only already existing instances are shared, and if a child triggers creation of a parent binding, the child owns it.
+Alternatively, stronger isolation can be implemented - only already existing instances are shared, and if a child triggers creation of a parent binding, the child owns it.
+
+### Implicit creation and placement (brainstorm notes, unresolved)
+
+Implicitly created instances make the ownership question sharper, and it is not solved yet. These notes record the framing, the constraint any answer must satisfy, and the candidate rules — as food for future thought, not a decision. See the [missing-binding policy](./missing_binding_policy.md) for the authorization side of the same discussion.
+
+An explicit binding communicates three facts: how to construct an instance, that DIBox is intended to manage it, and which container lifetime owns it ("where you bind determines the scope"). Implicit self-binding gets the construction recipe from the class constructor. The missing-binding policy only authorizes DIBox to use that inferred recipe; it does not choose which container owns the resulting instance. Placement therefore needs a separate rule. This distinction is invisible with one flat container, but nesting makes it unavoidable: should an implicitly created instance live for the app, run, or stage?
+
+**Lifetime invariant.** Any placement rule must satisfy: *an instance's dependencies must live in the same container or an ancestor* — a dependency must never be torn down before its dependent. The messed-up-graph caveat below (parent-bound ServiceC depending on child-shadowed ServiceB) is precisely a violation of this invariant, which is why it will be hard to debug. For explicit bindings placement is declared, so a future `validate()` can check the invariant statically over the bound subgraph; only implicit creations have inferred placement.
+
+**Candidate placement rules, none locked:**
+
+- *Requester owns* (the suggested rule above, applied to auto-wired types): simple, but violates the invariant upward. If a child triggers resolution of parent-bound `S`, and `S` pulls in unbound concrete `T`, placing `T` in the child means the child's exit calls `T.close()` while parent-owned `S` still holds it. Implicit dependencies of a parent-owned service must float to the parent.
+- *Float to the binding owner's container*: fixes the case above, but reintroduces order dependence — the same unbound `T` pulled once by parent-bound `S` and once by child-bound `C` has two candidate homes, and whether one or two instances exist, and where, depends on which resolution ran first.
+- *Container-local, never delegated* (current lean): implicit instances are private to the container whose resolution needed them; only explicit bindings participate in parent lookup. Deterministic and teachable in one sentence: "didn't bind it? it lives and dies with the container that needed it." Cross-scope sharing always requires a bind, because sharing *is* placement and placement is what binding declares. The parent-owned-service case is handled by evaluating implicit dependencies in the binding owner's container (forced by the invariant anyway). Cost: an expensive unbound type used in sibling scopes is silently re-created per scope — a perf/identity footgun until a `validate()` warning flags "type implicitly created in N sibling scopes; bind it where it belongs."
+
+Supporting evidence for the conservative lean: in every scoped scenario in [scopes_sketch.py](./scopes_sketch.py) — stages, tenants, jobs, CLI commands, Ray workers — the scoped containers bind everything they own explicitly. Implicit creation earns its keep in the flat/app case and for transitive internals within one container; nothing in the scenarios relies on implicit creation across a scope boundary.
+
+**Policy locality and inheritance.** A container's missing-binding policy should govern exactly the instances that will live in that container — an "open" child must not be able to place implicitly created instances into a "closed" parent. Open question: does `DIBox(parent=...)` inherit the parent's policy by default? Lean: inherit, overridable per child — a nested stage container is expected to behave like the app around it, and since scoped containers tend to bind explicitly anyway, inheritance is also safe.
 
 
 ### Lifecycle

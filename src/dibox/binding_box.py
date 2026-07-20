@@ -1,5 +1,6 @@
 import inspect
 from contextlib import AbstractAsyncContextManager, AbstractContextManager, asynccontextmanager, contextmanager
+from dataclasses import dataclass
 from functools import partial
 from typing import (
     Any,
@@ -10,7 +11,6 @@ from typing import (
     Concatenate,
     Generator,
     Iterator,
-    NamedTuple,
     TypeVar,
     cast,
     overload,
@@ -39,7 +39,8 @@ BindingTarget = _T | FactoryFunc[_T]
 TypeMatchPredicate = Callable[[type[Any]], bool]
 TypeAwareFactoryFunc = Callable[Concatenate[type[Any], ...], Any]
 
-class BindingMatch(NamedTuple):
+@dataclass(slots=True)
+class BindingMatch:
     binding: BindingRecord
     key: DIMapKey[Any]
     via_predicate: bool = False

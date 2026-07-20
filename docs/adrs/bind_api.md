@@ -13,9 +13,9 @@ box.bind(type, name, target=...)
 ```
 
 
-`bind(T)` with a single type argument self-binds a concrete type — equivalent to `bind(T, T)`. This is
-primarily useful in strict mode where implicit self-binding is disabled and every managed type must
-be registered explicitly, without the noise of repeating the name twice:
+`bind(T)` with a single type argument self-binds a concrete type — equivalent to `bind(T, T)`. It
+declares the type explicitly without repeating its name, which is useful when the type should be a
+container root or intentionally bypass the missing-binding policy:
 
 ```python
 box.bind(ServiceA)

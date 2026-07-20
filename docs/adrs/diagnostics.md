@@ -7,8 +7,8 @@ Resolution stack errors exist in source through `ResolutionError`. Cycle detecti
 
 Related ADRs:
 
-- [strict_mode.md](strict_mode.md): explicit-binding mode makes validation coverage more complete.
-- [implicit_self_binding.md](implicit_self_binding.md): permissive fallback limits what diagnostics can know before runtime.
+- [missing_binding_policy.md](missing_binding_policy.md): explicit roots provide validation entrypoints, while open roots and predicate bindings limit exhaustive enumeration.
+- [implicit_self_binding.md](implicit_self_binding.md): defines how diagnostics can derive concrete transitive nodes from constructor annotations.
 - [entrypoints.md](entrypoints.md): entry points determine which resolution roots diagnostics can traverse.
 - [binding_modules.md](binding_modules.md): binding modules provide future ownership metadata for module-aware diagnostics.
 
@@ -60,14 +60,13 @@ unconstructable dependencies, and cycles.
 tooling. A simple structured representation is enough; Graphviz or Mermaid output can be
 adapters rather than core API.
 
-Resolution mode affects coverage:
-
-- Strict: the managed type set is known from explicit bindings, so validation and graph
-  output can be comprehensive.
-- Semi-strict: explicit roots are known, but transitive implicit nodes may be derived by
-  following type hints from those roots.
-- Permissive: the resolvable type set is open-ended, so validation needs explicit roots,
-  such as `box.validate(from_entrypoints=[WebApp, Cli])`.
+Validation can start from concrete root bindings and derive transitive implicit nodes by
+following the same policy and constructor annotations used by runtime resolution. If the
+policy permits implicit roots, the accepted root set is open-ended and exhaustive validation
+requires caller-supplied entrypoints, such as `box.validate(from_entrypoints=[WebApp, Cli])`.
+Predicate bindings create a second boundary: a matching predicate satisfies an explicit-root
+requirement, but its possible matches cannot generally be enumerated. A full graph walk
+therefore cannot prove it has discovered every accepted root.
 
 ## Module-aware diagnostics
 
@@ -113,6 +112,6 @@ Open questions:
   assigned to an implicit app module or excluded from module-graph analysis.
 - Partial naming: if only some modules are named, the analysis should cover the named
   subset rather than requiring all modules to participate.
-- Semi-strict introspection: derived transitive nodes can appear only in diagnostic
+- Derived-node introspection: implicit transitive nodes can appear only in diagnostic
   output, or be materialized as generated bindings. Materialization improves graph
   completeness but adds implicit registry state.

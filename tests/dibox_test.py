@@ -1,16 +1,15 @@
 import re
 from contextlib import AbstractContextManager, asynccontextmanager
-from pathlib import Path
-from typing import Any, AsyncGenerator, AsyncIterator, no_type_check
+from typing import Any, AsyncGenerator, AsyncIterator
 from unittest import mock
 from unittest.mock import MagicMock
 
 import pytest
 from attrs import define
 
-from dibox import BindingBox, DIBox, ImplicitCreationPolicy, Injected, ResolutionError, ResolutionMode
-from dibox.binding_box import FactoryFunc
+from dibox import BindingBox, DIBox, Injected, MissingBindingPolicy, ResolutionError
 from dibox.dimap import ANY_ARG, WildArgName, WildType
+from dibox.missing_binding_policy import PolicyPreset
 
 
 @define
@@ -25,34 +24,46 @@ class Foo:
     def __init__(self, bar: Bar):
         self.bar = bar
 
-
-@pytest.fixture(params=["permissive", "strict", "semi-strict"])
-def resolution_mode(request: pytest.FixtureRequest) -> ResolutionMode:
-    return request.param
-
-
 class DIBoxProvideTest:
-    async def test_bound_subclass_is_instantiated_as_implementation(self, resolution_mode: ResolutionMode):
-        box = DIBox(mode=resolution_mode)
+    async def test_bound_subclass_is_instantiated_as_implementation(self):
+        box = DIBox()
         box.bind(Bar, BarDerived, s="test")
         bar_instance = await box.provide(Bar)
         assert isinstance(bar_instance, BarDerived)
         assert bar_instance.s == "test"
 
-    async def test_bound_instance_is_returned_as_is(self, resolution_mode: ResolutionMode):
-        box = DIBox(mode=resolution_mode)
+    async def test_bound_instance_is_returned_as_is(self):
+        box = DIBox()
         box.bind(Bar, instance=BarDerived(s="bound"))
         bar_instance = await box.provide(Bar)
         assert isinstance(bar_instance, BarDerived)
         assert bar_instance.s == "bound"
 
-    async def test_already_provided_instance_is_injected_into_new_type(self, resolution_mode: ResolutionMode):
-        box = DIBox(mode=resolution_mode)
+    async def test_already_provided_instance_is_injected_into_new_type(self):
+        box = DIBox()
         box.bind_many(Bar, Foo)
         bar_instance = await box.provide(Bar)  # bar = Bar()
         foo_instance = await box.provide(Foo)  # Foo(bar)
         assert isinstance(foo_instance, Foo)
         assert foo_instance.bar is bar_instance
+
+    @pytest.mark.parametrize("policy", ["explicit-roots", "closed"])
+    async def test_policy_requires_explicit_binding_for_root(self, policy: PolicyPreset):
+        box = DIBox(policy)
+
+        with pytest.raises(ResolutionError, match="root requires explicit binding"):
+            await box.provide(Foo)
+
+    @pytest.mark.skip(reason="The fix for this is not yet implemented. See G4 in missing_binding_policy.md")
+    async def test_explicit_roots_policy_rechecks_materialized_dependency_as_root(self):
+        box = DIBox("explicit-roots")
+        box.bind(Foo)
+
+        root = await box.provide(Foo)
+
+        assert isinstance(root.bar, Bar)
+        with pytest.raises(ResolutionError, match="root requires explicit binding"):
+            await box.provide(Bar)
 
     @pytest.mark.parametrize(
         ("type_request", "arg_name"),
@@ -64,11 +75,10 @@ class DIBoxProvideTest:
     )
     async def test_provided_instance_is_reused_on_subsequent_provide(
         self,
-        resolution_mode: ResolutionMode,
         type_request: WildType[Any],
         arg_name: WildArgName,
     ):
-        box = DIBox(mode=resolution_mode)
+        box = DIBox()
         box.bind(Bar, factory=lambda: Bar(s="test"))
 
         bar_instance1 = await box.provide(type_request, arg_name)
@@ -112,27 +122,15 @@ class DIBoxProvideTest:
         assert logger_args[0][0] == "Bar"
         assert logger_args[1][0] == "Foo"
 
-    async def test_default_implicit_creation_policy_forbids_value_types(self):
-        box = DIBox()
+class DIBoxConfigurationTest:
+    def test_exposes_supplied_policy(self):
+        policy = MissingBindingPolicy()
 
-        with pytest.raises(ResolutionError, match="denied by value-types guard"):
-            await box.provide(Path)
-
-    async def test_supplied_implicit_creation_policy_without_guard(self):
-        policy = ImplicitCreationPolicy(guard="none")
-        box = DIBox(implicit_creation_policy=policy)
-
-        await box.provide(Path)  # Should not raise, because guard is "none"
-
-    async def test_implicit_creation_policy_can_be_modified(self):
-        box = DIBox()
-        box.implicit_creation_policy.deny_type(Foo, name="boop")
-        with pytest.raises(ResolutionError, match="boop"):
-            await box.provide(Foo)
+        assert DIBox(policy).policy is policy
 
 class DIBoxGetTest:
-    async def test_get_returns_instance_created_by_provide(self, resolution_mode: ResolutionMode):
-        box = DIBox(mode=resolution_mode)
+    async def test_get_returns_instance_created_by_provide(self):
+        box = DIBox()
         box.bind_many(Bar, Foo)
         foo_provided = await box.provide(Foo)
         foo_resolved = box.get(Foo)
@@ -145,8 +143,8 @@ class DIBoxGetTest:
 
 
 class DIBoxInjectTest:
-    async def test_inject_decorator_supplies_bound_instance_to_annotated_param(self, resolution_mode: ResolutionMode):
-        box = DIBox(mode=resolution_mode)
+    async def test_inject_decorator_supplies_bound_instance_to_annotated_param(self):
+        box = DIBox()
         box.bind(Bar, BarDerived(s="injected"))
 
         @box.inject
@@ -158,18 +156,18 @@ class DIBoxInjectTest:
 
 
 class DIBoxFactoriesTest:
-    async def test_async_factory_result_used_as_instance(self, resolution_mode: ResolutionMode):
+    async def test_async_factory_result_used_as_instance(self):
         async def bar_factory() -> Bar:
             return Bar(s="async factory")
 
-        box = DIBox(mode=resolution_mode)
+        box = DIBox()
         box.bind(Bar, factory=bar_factory)
         bar_instance = await box.provide(Bar)
         assert isinstance(bar_instance, Bar)
         assert bar_instance.s == "async factory"
 
-    async def test_factory_dependencies_are_auto_provided_and_injected(self, resolution_mode: ResolutionMode):
-        box = DIBox(mode=resolution_mode)
+    async def test_factory_dependencies_are_auto_provided_and_injected(self):
+        box = DIBox()
 
         async def foo_factory(bar: Bar) -> Foo:
             return Foo(bar)
@@ -185,8 +183,8 @@ class DIBoxFactoriesTest:
         assert foo_instance.bar.s == "Yay"
         assert usual_bar_instance is foo_instance.bar
 
-    async def test_named_binding_is_injected_into_matching_factory_parameter(self, resolution_mode: ResolutionMode):
-        box = DIBox(mode=resolution_mode)
+    async def test_named_binding_is_injected_into_matching_factory_parameter(self):
+        box = DIBox()
 
         async def foo_factory(special: Bar) -> Foo:
             return Foo(special)
@@ -203,38 +201,6 @@ class DIBoxFactoriesTest:
         assert foo_instance.bar.s == "special"
         assert isinstance(usual_bar_instance, BarDerived)
         assert usual_bar_instance is not foo_instance.bar
-
-    def _make_factory_for_predicate(self, factory_style: str) -> FactoryFunc[Bar]:
-        @no_type_check
-        def no_annotation(t):
-            return BarDerived(t.__name__)
-
-        def with_type(t: type):
-            return BarDerived(t.__name__)
-
-        def with_generic(t: type[Bar]):
-            return BarDerived(t.__name__)
-
-        factories: dict[str, FactoryFunc[Bar]] = {
-            "no-annotation": no_annotation,
-            "typed": with_type,
-            "generic": with_generic,
-        }
-        return factories[factory_style]
-
-    @pytest.mark.parametrize("factory_style", ["no-annotation", "typed", "generic"])
-    async def test_factory_receives_matched_type_when_bound_by_predicate(
-        self, resolution_mode: ResolutionMode, factory_style: str
-    ):
-        box = DIBox(mode=resolution_mode)
-        bar_factory = self._make_factory_for_predicate(factory_style)
-        box.bind(lambda t: "Bar" in t.__name__, factory=bar_factory)
-
-        bar_instance = await box.provide(BarDerived)
-
-        assert isinstance(bar_instance, BarDerived)
-        assert bar_instance.s == "BarDerived"
-
 
 class DIBoxLifecycleManagementTest:
     async def test_teardown_order_is_lifo_across_provided_instances(self):

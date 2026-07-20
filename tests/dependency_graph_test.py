@@ -2,19 +2,11 @@ from typing import Any, Callable
 
 import pytest
 
-from dibox import (
-    ANY_ARG,
-    ANY_TYPE,
-    BindingBox,
-    ImplicitCreationPolicy,
-    ResolutionError,
-    ResolutionMode,
-)
+from dibox import ANY_ARG, ANY_TYPE, BindingBox, MissingBindingPolicy, ResolutionError
 from dibox.dependency_graph import DependencyGraph, NodeKey
 
 
 class Leaf:
-    """A simple class with no dependencies. Intentionally all-default for ZDG check."""
     def __init__(self, tag: str = "default", *arg: Any, **kwargs: Any):
         self.tag = tag
 
@@ -40,17 +32,11 @@ class RootWithSharedDependency:
         self.left = left
         self.right = right
 
-
-@pytest.fixture(params=["permissive", "strict", "semi-strict"])
-def resolution_mode(request: pytest.FixtureRequest) -> ResolutionMode:
-    return request.param
-
-
 class DependencyGraphBuildNodeTest:
-    def test_build_node_walks_graph_from_root_to_leaf(self, resolution_mode: ResolutionMode):
+    def test_build_node_walks_graph_from_root_to_leaf(self):
         bindings = BindingBox()
         bindings.bind_many(Leaf, Branch, Root)
-        graph = DependencyGraph(resolution_mode, bindings)
+        graph = DependencyGraph(bindings)
 
         root_node = graph.build_node((Root, ANY_ARG))
         branch_node = root_node.sub_nodes[0]
@@ -69,10 +55,10 @@ class DependencyGraphBuildNodeTest:
         ]
         assert [node.binding.name for node in nodes] == ["Leaf", "Branch", "Root"]
 
-    def test_build_node_returns_existing_node_on_repeated_request(self, resolution_mode: ResolutionMode):
+    def test_build_node_returns_cached_node_for_repeated_query(self):
         bindings = BindingBox()
         bindings.bind_many(Leaf, Branch, Root)
-        graph = DependencyGraph(resolution_mode, bindings)
+        graph = DependencyGraph(bindings)
 
         root_node_1 = graph.build_node((Root, ANY_ARG))
         root_node_2 = graph.build_node((Root, ANY_ARG))
@@ -81,7 +67,7 @@ class DependencyGraphBuildNodeTest:
 
     def test_build_node_surfaces_non_concrete_request_denial(self):
         bindings = BindingBox()
-        graph = DependencyGraph("permissive", bindings)
+        graph = DependencyGraph(bindings)
         with pytest.raises(
             ResolutionError,
             match="implicit creation denied because request is not a concrete class",
@@ -90,23 +76,29 @@ class DependencyGraphBuildNodeTest:
 
         assert exc_info.value.resolution_stack == [(ANY_TYPE, ANY_ARG)]
 
-    def test_bad_resolution_mode_raises_value_error(self):
-        with pytest.raises(ValueError, match="Invalid resolution mode"):
-            DependencyGraph("not-a-mode", BindingBox()) # type: ignore
+    def test_build_node_wraps_non_introspectable_factory_signature_error(self):
+        bindings = BindingBox()
+        bindings.bind(Leaf, factory=str)
+        graph = DependencyGraph(bindings)
 
+        with pytest.raises(ResolutionError, match="cannot introspect signature") as exc_info:
+            graph.build_node((Leaf, ANY_ARG))
+
+        assert isinstance(exc_info.value.__cause__, ValueError)
+        assert exc_info.value.resolution_stack == [(Leaf, ANY_ARG)]
 
 class DependencyGraphWalkTest:
     def test_walk_yields_nodes_in_dependency_first_order(self):
         bindings = BindingBox()
         bindings.bind_many(Leaf, Branch, Root)
-        graph = DependencyGraph("strict", bindings)
+        graph = DependencyGraph(bindings, policy="closed")
         root_node = graph.build_node((Root, ANY_ARG))
 
         steps = list(graph.walk(root_node, present_map={}))
         assert [step.node_key for step in steps] == [
             (Leaf, ANY_ARG),
             (Branch, ANY_ARG),
-            (Root, ANY_ARG)
+            (Root, ANY_ARG),
         ]
         assert [step.dependencies for step in steps] == [
             {},
@@ -117,7 +109,7 @@ class DependencyGraphWalkTest:
     def test_walk_skips_present_branches(self):
         bindings = BindingBox()
         bindings.bind_many(Leaf, Branch, Root)
-        graph = DependencyGraph("strict", bindings)
+        graph = DependencyGraph(bindings, policy="closed")
         root_node = graph.build_node((Root, ANY_ARG))
 
         present_map: dict[NodeKey, object] = {
@@ -132,7 +124,7 @@ class DependencyGraphWalkTest:
     def test_walk_emits_shared_dependency_only_once(self):
         bindings = BindingBox()
         bindings.bind_many(Leaf, LeftBranch, RightBranch, RootWithSharedDependency)
-        graph = DependencyGraph("strict", bindings)
+        graph = DependencyGraph(bindings, policy="closed")
         root_node = graph.build_node((RootWithSharedDependency, ANY_ARG))
 
         steps = list(graph.walk(root_node, present_map={}))
@@ -151,142 +143,74 @@ class DependencyGraphWalkTest:
         ]
 
 
-class DependencyGraphPermissiveModeTest:
-    """Tests for behavior specific to permissive and semi-strict mode."""
-    def test_unbound_root_produces_implicit_node(self):
+class DependencyGraphPolicyBoundaryTest:
+    def test_explicit_roots_policy_rejects_unbound_root(self):
+        graph = DependencyGraph(BindingBox(), policy="explicit-roots")
+
+        with pytest.raises(ResolutionError, match="root requires explicit binding") as exc_info:
+            graph.build_node((Leaf, ANY_ARG))
+
+        assert exc_info.value.resolution_stack == [(Leaf, ANY_ARG)]
+
+    def test_explicit_roots_policy_allows_unbound_transitive_dependency(self):
         bindings = BindingBox()
-        bindings.bind(Leaf)
-        graph = DependencyGraph("permissive", bindings)
+        bindings.bind(Root)
+        graph = DependencyGraph(bindings, policy="explicit-roots")
 
         root_node = graph.build_node((Root, ANY_ARG))
-        assert root_node.key == (Root, ANY_ARG)
-        assert len(root_node.sub_nodes) == 1
+
         assert root_node.sub_nodes_keys == {"branch": (Branch, ANY_ARG)}
         assert root_node.sub_nodes[0].key == (Branch, ANY_ARG)
 
-    @pytest.mark.parametrize("resolution_mode", ["permissive", "semi-strict"])
-    def test_unbound_transitive_dependency_produces_implicit_node(self, resolution_mode: ResolutionMode):
-        bindings = BindingBox()
-        bindings.bind_many(Root, Leaf)
-        graph = DependencyGraph(resolution_mode, bindings)
-
-        root_node = graph.build_node((Root, ANY_ARG))
-        assert root_node.sub_nodes_keys["branch"] == (Branch, ANY_ARG)
-        branch_node = root_node.sub_nodes[0]
-        assert branch_node.key == (Branch, ANY_ARG)
-        assert branch_node.sub_nodes_keys["leaf"] == (Leaf, ANY_ARG)
-
-
-    @pytest.mark.parametrize("resolution_mode", ["permissive", "semi-strict"])
-    def test_default_policy_allows_ordinary_class(self, resolution_mode: ResolutionMode):
+    def test_policy_denial_for_unbound_transitive_dependency_includes_resolution_stack(self):
         bindings = BindingBox()
         bindings.bind(Branch)
-        graph = DependencyGraph(resolution_mode, bindings)
+        graph = DependencyGraph(bindings, policy="closed")
+
+        with pytest.raises(ResolutionError, match="dependency requires an allow rule") as exc_info:
+            graph.build_node((Branch, ANY_ARG))
+
+        assert exc_info.value.resolution_stack == [(Branch, ANY_ARG), (Leaf, "leaf")]
+
+    def test_allow_rule_authorizes_unbound_transitive_dependency(self):
+        policy = MissingBindingPolicy.from_preset("closed")
+        policy.allow_type(Leaf)
+        bindings = BindingBox()
+        bindings.bind(Branch)
+        graph = DependencyGraph(bindings, policy)
 
         branch_node = graph.build_node((Branch, ANY_ARG))
 
         assert branch_node.sub_nodes_keys == {"leaf": (Leaf, ANY_ARG)}
 
-    def test_non_introspectable_builtin_raises_resolution_error_with_stack(self):
-        """Signature introspection failure must surface as ResolutionError, not ValueError."""
-        graph = DependencyGraph(
-            "permissive",
-            BindingBox(),
-            implicit_creation_policy=ImplicitCreationPolicy(guard="none"),
-        )
-
-        with pytest.raises(ResolutionError, match="cannot introspect signature") as exc_info:
-            graph.build_node((str, ANY_ARG))
-
-        assert exc_info.value.resolution_stack == [(str, ANY_ARG)]
-
-    @pytest.mark.parametrize("resolution_mode", ["permissive", "semi-strict"])
-    def test_policy_denial_surfaces_as_resolution_error_with_stack(self, resolution_mode: ResolutionMode):
-        bindings = BindingBox()
-        bindings.bind(Branch)
-        policy = ImplicitCreationPolicy(guard="none")
-        policy.deny_type(Leaf, name="blocked leaf")
-        graph = DependencyGraph(resolution_mode, bindings, implicit_creation_policy=policy)
-
-        with pytest.raises(ResolutionError, match='denied by rule "blocked leaf"') as exc_info:
-            graph.build_node((Branch, ANY_ARG))
-
-        assert exc_info.value.resolution_stack == [(Branch, ANY_ARG), (Leaf, "leaf")]
-
-    def test_explicit_binding_bypasses_restrictive_policy(self):
-        policy = ImplicitCreationPolicy()
+    def test_explicit_binding_bypasses_policy(self):
+        policy = MissingBindingPolicy(roots="require-binding", unmatched_dependencies="require-allow-rule")
         policy.deny_type(Leaf)
         bindings = BindingBox()
         bindings.bind(Leaf)
-        graph = DependencyGraph(
-            "permissive",
-            bindings,
-            implicit_creation_policy=policy,
-        )
+        graph = DependencyGraph(bindings, policy)
 
         assert graph.build_node((Leaf, ANY_ARG)).binding.name == "Leaf"
 
-    def test_policy_predicate_exception_is_not_laundered(self):
+    def test_policy_predicate_exception_propagates_unchanged(self):
         def broken_policy(_requested_type: type[Any]) -> bool:
             raise TypeError("broken policy")
 
-        policy = ImplicitCreationPolicy()
+        policy = MissingBindingPolicy()
         policy.deny_if(broken_policy)
-        graph = DependencyGraph("permissive", BindingBox(), implicit_creation_policy=policy)
+        graph = DependencyGraph(BindingBox(), policy)
 
         with pytest.raises(TypeError, match="broken policy"):
             graph.build_node((Leaf, ANY_ARG))
 
 
-class DependencyGraphStrictModeTest:
-    """Tests for behavior specific to strict and semi-strict mode."""
-
-    @pytest.mark.parametrize("resolution_mode", ["strict", "semi-strict"])
-    def test_bound_root_produces_explicit_node(self, resolution_mode: ResolutionMode):
-        bindings = BindingBox()
-        bindings.bind_many(Leaf, Branch)
-        graph = DependencyGraph(resolution_mode, bindings)
-
-        branch_node = graph.build_node((Branch, ANY_ARG))
-        assert branch_node.key == (Branch, ANY_ARG)
-        assert branch_node.sub_nodes_keys == {"leaf": (Leaf, ANY_ARG)}
-
-
-    @pytest.mark.parametrize("resolution_mode", ["strict", "semi-strict"])
-    def test_unbound_root_raises_resolution_error(self, resolution_mode: ResolutionMode):
-        bindings = BindingBox()
-        graph = DependencyGraph(resolution_mode, bindings)
-
-        with pytest.raises(ResolutionError, match="no binding found") as exc_info:
-            graph.build_node((Root, ANY_ARG))
-
-        assert exc_info.value.resolution_stack == [(Root, ANY_ARG)]
-
-
-    def test_unbound_transitive_dependency_raises_resolution_error(self):
-        bindings = BindingBox()
-        bindings.bind_many(Root, Leaf) # Branch is not bound!
-        graph = DependencyGraph("strict", bindings)
-        with pytest.raises(ResolutionError, match="no binding found") as exc_info:
-            graph.build_node((Root, ANY_ARG))
-
-        assert exc_info.value.resolution_stack == [(Root, ANY_ARG), (Branch, "branch")]
-
-
-class DependencyGraphFutureAnnotationsBugTest:
-    """Regression tests for the __future__.annotations compatibility bug.
-
-    With `from __future__ import annotations`, all annotations are stored as strings
-    at compile time. inspect.signature() returns string annotations instead of live
-    types, the binding lookup then fails to match the bound class
-    """
-
-    def test_future_annotations_breaks_dependency_resolution(self):
+class DependencyGraphFutureAnnotationsTest:
+    def test_future_annotations_do_not_break_dependency_resolution(self):
         from future_annotations_classes import FutureBranch, FutureLeaf
-
+        # With `from __future__ import annotations`, all annotations are stored as strings
         bindings = BindingBox()
         bindings.bind_many(FutureLeaf, FutureBranch)
-        graph = DependencyGraph("strict", bindings)
+        graph = DependencyGraph(bindings, policy="closed")
 
         branch_node = graph.build_node((FutureBranch, ANY_ARG))
         assert branch_node.key == (FutureBranch, ANY_ARG)
@@ -312,7 +236,7 @@ async def async_factory_with_type_arg(t: type[Leaf]) -> Leaf:
     return t("async_factory_with_type_arg")
 
 
-class DependencyGraphPredicateBindingsTest:
+class TestDependencyGraphPredicateBindingContracts:
     @pytest.mark.parametrize(
         "factory",
         [
@@ -321,20 +245,23 @@ class DependencyGraphPredicateBindingsTest:
             factory_with_type_arg,
             factory_with_type_any_arg,
             factory_with_type_specific_arg,
-            async_factory_with_type_arg
-        ] # type: ignore - untyped factories are intentional for testing
+            async_factory_with_type_arg,
+        ],  # type: ignore[list-item] - intentionally includes untyped factories for specialization coverage
     )
-    async def test_node_build_with_bound_type_argument(self, factory: Callable[..., Leaf]):
+    async def test_predicate_factory_with_type_first_parameter_receives_requested_type(
+        self,
+        factory: Callable[..., Leaf],
+    ):
         bindings = BindingBox()
         bindings.bind(lambda t: t is Leaf, factory)
-        graph = DependencyGraph("strict", bindings)
+        graph = DependencyGraph(bindings, policy="closed")
 
         leaf_node = graph.build_node((Leaf, ANY_ARG))
         res = await leaf_node.binding.call_async()
         assert isinstance(res, Leaf)
         assert res.tag == factory.__name__
 
-    def test_factory_with_non_type_first_arg_is_not_specialized(self):
+    def test_factory_with_non_type_first_arg_keeps_dependency_resolution(self):
         class FactoryDependency:
             pass
         # A predicate factory whose first parameter is a dependency (not a `type` argument)
@@ -342,8 +269,7 @@ class DependencyGraphPredicateBindingsTest:
             return Leaf("factory_with_dependency_arg")
         bindings = BindingBox()
         bindings.bind(lambda t: t is Leaf, factory_with_dependency_arg)
-        graph = DependencyGraph("permissive", bindings)
+        graph = DependencyGraph(bindings, policy="open")
 
         leaf_node = graph.build_node((Leaf, ANY_ARG))
-        # type argument is not bound, so it falls through to sub-dependency resolution
         assert leaf_node.sub_nodes_keys == {"dependency": (FactoryDependency, ANY_ARG)}

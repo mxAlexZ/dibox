@@ -27,11 +27,10 @@ Async-native dependency injection framework based on type hints.
     - [Factory Functions](#factory-functions)
     - [Named dependencies](#named-dependencies)
     - [Dynamic Predicate-Based Binding](#dynamic-predicate-based-binding)
-    - [Resolution Modes](#resolution-modes)
+    - [Missing-Binding Policy](#missing-binding-policy)
   - [Binding Modules](#binding-modules)
     - [Organizing bindings by feature](#organizing-bindings-by-feature)
     - [Reusing modules across contexts](#reusing-modules-across-contexts)
-    - [Overriding bindings for tests](#overriding-bindings-for-tests)
     - [Resolution order](#resolution-order)
 - [Why use DIBox?](#why-use-dibox)
   - [The Power of Auto-Wiring](#the-power-of-auto-wiring)
@@ -56,7 +55,7 @@ DIBox resolves, instantiates, and injects dependencies by following naturally de
 - **Lifecycle Management:** Resources start and clean up automatically. DIBox recognizes context managers, generator factories and `start`/`close` conventions.
 - **Context-aware `@inject`:** Decorate at import time, resolve at call time from the active container — no container reference at the call site.
 - **Flexible Bindings:** Interfaces, instances, sync/async factories, named dependencies, and predicate-based bindings.
-- **Resolution Controls:** Permissive, semi-strict, and strict modes control where implicit binding applies; creation policies can allowlist packages and deny specific categories without registering every concrete type.
+- **Missing-Binding Policy:** Choose whether unbound roots and dependencies may be created implicitly, with allow and deny rules for trusted types and packages.
 - **Non‑Invasive:** Works with any class using type hints — third-party SDKs, dataclasses, attrs — no wrappers or base classes required.
 - **Modular:** Group bindings into reusable `BindingBox` modules. Compose, override, and share across workers, tests, and entry points.
 - **Typed API:** Fully type-annotated — works seamlessly with type checkers and IDE autocompletion.
@@ -131,7 +130,7 @@ async def run():
 asyncio.run(run())
 ```
 
-> **Next step:** The quickstart uses permissive mode (the default), where unbound concrete types are automatically created (implicitly self-bound). It keeps concrete graphs low-boilerplate. Use semi-strict or strict mode to control where implicit binding applies, or a deny-all policy to allowlist which types qualify. See [Resolution Modes](#resolution-modes).
+> **Next step:** The quickstart uses the default `"open"` policy, where eligible unbound concrete types are created automatically. Use `"explicit-roots"` to declare the container's entrypoints while retaining inferred internals, or `"closed"` to require allow rules for inferred dependencies. See [Missing-Binding Policy](#missing-binding-policy).
 
 ## Usage Guide
 
@@ -331,86 +330,58 @@ app_settings = await box.provide(AppSettings)
 db_settings = await box.provide(DBSettings)
 ```
 
-#### Resolution Modes
+#### Missing-Binding Policy
 
-DIBox supports three resolution modes, set at construction time:
+When no binding matches a concrete class, DIBox can use the class itself as a factory and follow its constructor annotations. The missing-binding policy controls where this implicit creation is allowed:
 
 ```python
-box = DIBox()                    # permissive (default)
-box = DIBox(mode="semi-strict")  # semi-strict
-box = DIBox(mode="strict")       # strict
+box = DIBox()                         # "open" (default)
+box = DIBox(policy="explicit-roots")
+box = DIBox(policy="closed")
 ```
 
-What changes is _implicit self-binding_: whether the container is allowed to treat an unbound concrete type as its own factory when no `bind()` entry exists for it.
+- **`"open"`** — eligible unbound roots and transitive dependencies are created implicitly. This is the zero-configuration path used throughout the QuickStart.
+- **`"explicit-roots"`** — a direct request must have a binding, but eligible unbound dependencies inside that accepted graph are still created implicitly. This makes the container's entrypoints explicit without registering every implementation detail.
+- **`"closed"`** — direct requests must have bindings, and unbound transitive dependencies must match an allow rule. This limits inferred construction to trusted types and packages.
 
-- **Permissive (default)** — an unbound concrete type may be implicitly self-bound without an explicit `bind()`, subject to the implicit creation policy. The default policy blocks common primitive/value leaves such as `str`, `int`, and `Path`. The QuickStart examples use this mode. It keeps concrete graphs low-boilerplate; use a deny-all policy to restrict eligibility to owned packages without registering each type.
+Common value types such as `str`, `int`, and `Path` are not created implicitly by default. Interfaces, external values, and constructor parameters that express configuration choices also need explicit bindings. An explicit binding always bypasses the missing-binding policy because it already records construction intent.
 
-- **Semi-strict** — declare which types are owned resolution roots with `bind()`; the container implicitly self-binds their concrete transitive dependencies. Ownership is explicit at the boundary — where it matters — without requiring pre-registration of every interior implementation detail.
-
-- **Strict** — every type in the dependency graph must be explicitly registered. Implicit self-binding is disabled: the container raises an error for any unbound type. Use it when you want exhaustive, registry-level visibility over every type the container may resolve.
-
-Types that cannot be inferred — interfaces, external values, and raw parameters — always need explicit bindings. Implicit self-binding only fills in concrete services with no configuration decisions.
-
-##### Semi-strict example
+With explicit roots, bind the services that callers may request directly and let their concrete internals follow constructor annotations:
 
 ```python
-box = DIBox(mode="semi-strict")
+box = DIBox(policy="explicit-roots")
 
-box.bind(AppConfig, instance=load_config())          # external value — always explicit
-box.bind(StorageClient, S3StorageClient)             # interface → implementation
-box.bind_many(AuthService, ReportService)  # root services; transitive concrete deps implicitly self-bound
+box.bind(AppConfig, instance=load_config())  # external value
+box.bind(StorageClient, S3StorageClient)     # interface → implementation
+box.bind_many(AuthService, ReportService)    # accepted request roots
+
+report_service = await box.provide(ReportService)
 ```
 
-##### Strict example
+`bind_many(...)` is shorthand for registering several bindings at once.
+
+For finer control, create a policy object and add rules for exact types, packages and their subpackages, or custom predicates. Deny rules take precedence over allow rules:
 
 ```python
-box = DIBox(mode="strict")
-
-box.bind(AppConfig, instance=load_config())          # external value
-box.bind(StorageClient, S3StorageClient)             # interface → implementation
-box.bind_many(Database, AuthService, ReportService)  # every concrete type must be declared
-```
-
-`bind(T)` registers one self-binding. `bind_many(...)` is shorthand for registering several bindings at once; behavior is the same as calling `bind(...)` repeatedly.
-
-##### Controlling implicit creation
-
-Resolution mode decides where implicit self-binding may happen: at roots and dependencies, only at dependencies, or nowhere. Where the mode permits it, the implicit creation policy decides which unbound concrete types qualify.
-
-The policy evaluates each type in this order:
-
-1. A matching deny rule denies it.
-2. Otherwise, a matching allow rule allows it.
-3. If no rule matches, the configured guard decides.
-
-In short, deny rules take precedence over allow rules, and matching rules take precedence over the guard. The `"deny-all"` guard is therefore a fallback, not a deny rule: it denies only types that matched no allow rule. This turns allow rules into a strict allowlist without requiring every concrete graph type to be registered.
-
-Rules can match packages and their subpackages, exact types, or custom predicates. This example allows application-owned types while requiring explicit bindings for Pydantic DTOs:
-
-```python
-from dibox import DIBox, ImplicitCreationPolicy
+from dibox import DIBox, MissingBindingPolicy
 from pydantic import BaseModel
 
-policy = ImplicitCreationPolicy(guard="deny-all")
+policy = MissingBindingPolicy.from_preset("closed")
 policy.allow_package("my_app")
 policy.deny_if(
     lambda type_to_check: issubclass(type_to_check, BaseModel),
     name="Pydantic DTOs",
 )
 
-box = DIBox(implicit_creation_policy=policy)
+box = DIBox(policy=policy)
+box.bind(AppConfig, instance=load_config())
+box.bind(StorageClient, S3StorageClient)
+box.bind(ReportService)  # root bindings are still required
 ```
 
-The result is:
+Here, unbound dependencies defined in `my_app` may be inferred, except Pydantic models. Other unmatched dependencies require an explicit binding. Allow rules do not authorize roots under `"explicit-roots"` or `"closed"`; roots remain visible through their bindings.
 
-- Other types in `my_app` match the package allow rule and are allowed before the guard runs.
-- Pydantic models in `my_app` match both rules but are denied because deny rules come first.
-- Types outside `my_app` match neither rule and are denied by the `"deny-all"` guard.
-- Explicit bindings bypass the policy, allowing intentional exceptions for any denied type.
-
-The other guards are `"value-types"` (the default), which blocks common primitive and value types; `"zero-dependency"`, which blocks types without required constructor parameters; and `"none"`, which allows every unmatched concrete type.
-
-Combine this policy with permissive mode when allowlisted types may be resolution roots, or semi-strict mode when roots should still be explicitly bound. Strict mode disables implicit self-binding entirely and therefore does not consult the policy.
+Rules can be added with `allow_type()`, `deny_type()`, `allow_package()`, `deny_package()`, `allow_if()`, and `deny_if()`. Configure the policy before the first resolution because compiled dependency graphs are cached.
 
 ### Binding Modules
 
@@ -504,30 +475,10 @@ async with DIBox(parent=run_box) as stage:
 # GPUContext released when the stage exits
 ```
 
-#### Overriding bindings for tests
-
-When modules are composed, the last registered wins. This is useful for integration tests: register the production modules first, then add a module with fakes on top without touching the original module.
-
-```python
-# tests/fakes.py
-fake_storage = BindingBox()
-fake_storage.bind(StorageClient, InMemoryStorageClient)  # no S3 in tests
-
-# tests/test_classifier.py
-async def test_classifier():
-    async with DIBox() as box:
-        box.bind(AppConfig, instance=test_config)
-        box.add_bindings(ml_bindings)      # real ML module
-        box.add_bindings(fake_storage)     # replaces S3StorageClient — last wins
-
-        classifier = await box.provide(Classifier)
-        ...
-```
-
 #### Resolution order
 
 When the same type is bound in multiple places, **last registered wins**: container's own `bind()` calls always take highest precedence, then modules in reverse registration order.
-If no binding matches at all, DIBox can fall back to using the requested type as its own factory — this is what makes `await box.provide(SomeService)` work without an explicit `box.bind(SomeService)`. Permissive mode allows this at roots and dependencies, semi-strict restricts it to transitive dependencies, and strict disables it. In the first two modes, the implicit creation policy can further restrict eligible types. See [Resolution Modes](#resolution-modes).
+If no binding matches at all, DIBox can fall back to using the requested type as its own factory — this is what makes `await box.provide(SomeService)` work without an explicit `box.bind(SomeService)`. The missing-binding policy controls whether that fallback is available at the request root and for transitive dependencies. See [Missing-Binding Policy](#missing-binding-policy).
 
 ## Why use DIBox?
 ### The Power of Auto-Wiring
