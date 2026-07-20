@@ -11,30 +11,20 @@ This library is in its early stages. The design and API are not yet fully establ
 
 ---
 
-Async-native dependency injection framework based on type hints.
+DIBox is an async-native dependency injection container for Python. It builds and manages object graphs from standard type hints, removing factory and wiring boilerplate.
+
+Concrete classes can be constructed automatically; explicit bindings supply configuration, choose implementations, or define factories. DIBox also coordinates startup and reverse-order teardown for managed resources.
 
 - [Installation](#installation)
-- [What is DIBox?](#what-is-dibox)
 - [Key Features](#key-features)
 - [QuickStart](#quickstart)
-  - [1. Define your application as usual](#1-define-your-application-as-usual)
-  - [2. Wire and Run](#2-wire-and-run)
 - [Usage Guide](#usage-guide)
-  - [Using Decorators for Injection](#using-decorators-for-injection)
-  - [Resource Lifecycle](#resource-lifecycle)
+    - [Using Decorators for Injection](#using-decorators-for-injection)
+    - [Resource Lifecycle](#resource-lifecycle)
     - [Binding Patterns](#binding-patterns)
-    - [Binding Interfaces & Instances](#binding-interfaces--instances)
-    - [Factory Functions](#factory-functions)
-    - [Named dependencies](#named-dependencies)
-    - [Dynamic Predicate-Based Binding](#dynamic-predicate-based-binding)
     - [Missing-Binding Policy](#missing-binding-policy)
-  - [Binding Modules](#binding-modules)
-    - [Organizing bindings by feature](#organizing-bindings-by-feature)
-    - [Reusing modules across contexts](#reusing-modules-across-contexts)
-    - [Resolution order](#resolution-order)
+    - [Binding Modules](#binding-modules)
 - [Why use DIBox?](#why-use-dibox)
-  - [The Power of Auto-Wiring](#the-power-of-auto-wiring)
-  - [Comparison with Other Frameworks](#comparison-with-other-frameworks)
 - [Contributing](#contributing)
 
 ## Installation
@@ -43,11 +33,6 @@ pip install dibox
 ```
 
 Requires Python 3.11+.
-
-## What is DIBox?
-DIBox is an async‑native dependency injection container that uses standard Python type hints to build and manage your service dependency graph automatically. The core philosophy is to remove factory and wiring boilerplate so you can focus on application logic.
-
-DIBox resolves, instantiates, and injects dependencies by following naturally defined type hints in constructors or entry points. It also orchestrates asynchronous startup and safe teardown for resources like database connections, credential loaders, or HTTP clients without extra glue code.
 
 ## Key Features
 - **Auto-Wiring:** Type-annotated constructors are resolved and injected automatically — no factory boilerplate.
@@ -61,7 +46,7 @@ DIBox resolves, instantiates, and injects dependencies by following naturally de
 - **Typed API:** Fully type-annotated — works seamlessly with type checkers and IDE autocompletion.
 
 ## QuickStart
-DIBox requires almost no setup. Define your classes as usual—whether you use standard Python classes with `__init__`, dataclasses, or attrs models.
+DIBox requires almost no setup. Define your classes as usual — whether you use standard Python classes with `__init__`, dataclasses, or attrs models.
 
 ### 1. Define your application as usual
 Just use type hints to declare dependencies, no DI boilerplate needed.
@@ -69,13 +54,16 @@ Just use type hints to declare dependencies, no DI boilerplate needed.
 ```python
 import asyncio
 
+
 class Credentials:
     def __init__(self, username: str):
         self.username = username
 
+
 class Database:
     def __init__(self, creds: Credentials):
         self.creds = creds
+
 
 class Service:
     def __init__(self, db: Database):
@@ -91,41 +79,51 @@ class Service:
 
     def run(self):
         print("Service is running...")
-
 ```
-DIBox detects and manages lifecycle hooks automatically. The `Service` class below uses `start()`/`close()` — one of several supported patterns, covered in full in [Resource Lifecycle](#resource-lifecycle).
+
+DIBox detects and manages lifecycle hooks automatically. `Service` uses `start()`/`close()` — one of several supported patterns covered in [Resource Lifecycle](#resource-lifecycle).
 
 ### 2. Wire and Run
 
-Only bind what DIBox can't infer — here, `Credentials` because it's a raw value with no type-hinted constructor to follow.
+Only bind what DIBox can't infer — here, a configured `Credentials` instance because DIBox should not invent a value for its `username: str` parameter.
 
 ```python
 from dibox import DIBox
 
 box = DIBox()
-box.bind(Credentials, Credentials(username="admin"))  # raw value: bind it explicitly
+box.bind(Credentials, Credentials(username="admin"))  # configured instance: bind it explicitly
+
 
 async def main():
-    async with box:                           # activate container; start() called on managed resources
-        service = await box.provide(Service)  # resolve the graph: Credentials → Database → Service
+    async with box:  # activate the container
+        service = await box.provide(Service)  # build the graph and call Service.start()
         service.run()
-    # close() called automatically on exit
+    # Service.close() is called automatically on exit
+
 
 asyncio.run(main())
 ```
 
+The binding supplies the configured `Credentials`. With the default `"open"` policy, DIBox infers how to construct `Database` and `Service` from their constructor annotations.
+
 For framework entry points — FastAPI routes, CLI commands — `@inject` is the idiomatic choice. Decoration happens at module load time; resolution happens at call time from whichever container is active:
 
 ```python
-from dibox import inject, Injected
+from dibox import DIBox, Injected, inject
 
-@inject
-async def main(service: Injected[Service]):  # Injected[T] marks the parameter for injection
+app_box = DIBox()
+app_box.bind(Credentials, Credentials(username="admin"))
+
+
+@inject  # Injected[T] marks the parameter for injection
+async def run_service(service: Injected[Service]):
     service.run()
 
+
 async def run():
-    async with box:   # makes box the active container for this async context
-        await main()  # service is resolved and injected automatically
+    async with app_box:  # make app_box active in this async context
+        await run_service()  # resolve and inject Service automatically
+
 
 asyncio.run(run())
 ```
@@ -137,7 +135,7 @@ asyncio.run(run())
 ### Using Decorators for Injection
 Decorators allow injecting dependencies into entry points — API routes, CLI commands, Lambda handlers — without cluttering call sites. A key feature: `@inject` rewrites the function's runtime signature, removing `Injected[T]` parameters. Frameworks that inspect signatures at import/routing time only see your "real" parameters (path/query args, request objects, etc.).
 
-DIBox offers three options in increasing order of explicitness.
+DIBox offers two options with different container-selection behavior.
 
 #### 1. `@inject` — context-based (idiomatic)
 
@@ -159,11 +157,11 @@ from fastapi import FastAPI
 from dibox import DIBox, inject, Injected
 
 box = DIBox()
+box.bind(Database, factory=create_database)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with box:
-        box.bind(Database, await create_database())
         yield  # app runs here; @inject resolves from box
 
 app = FastAPI(lifespan=lifespan)
@@ -191,12 +189,6 @@ async def specific_handler(service: Injected[Service]):
 Useful when you have multiple concurrent containers, in integration tests where you want injection to be explicit, or when you simply prefer the container reference visible at the call site.
 
 For advanced use cases (custom container resolution strategies, enforcing architectural layers), the underlying `Injector` class is available directly. It accepts either a container instance or a `container_resolver` callable and exposes the same `.inject` decorator.
-
-#### Imperative entrypoints (planned)
-
-The entrypoints ADR also proposes `DIBox.call()` and `DIBox.partial()` for direct execution use cases (injecting by inspecting the function signature without `Injected[...]` markers). These APIs are not implemented yet (currently, `DIBox.call()` raises `NotImplementedError`).
-
-Today, the supported imperative API is `await box.provide(T)` (and `box.get(T)` for already-created instances).
 
 ### Resource Lifecycle
 
@@ -465,54 +457,38 @@ def enhance_v2(config: AppConfig, tiles: list[bytes]) -> list[bytes]:
     return asyncio.run(_run())
 ```
 
-The same module also works in-process — for example, as a scoped stage container in the main pipeline:
-
-```python
-async with DIBox(parent=run_box) as stage:
-    stage.add_bindings(enhance_bindings)
-    enhancer = await stage.provide(Enhancer)
-    tiles = await enhancer.enhance(tiles)
-# GPUContext released when the stage exits
-```
-
 #### Resolution order
 
-When the same type is bound in multiple places, **last registered wins**: container's own `bind()` calls always take highest precedence, then modules in reverse registration order.
+Direct container bindings take precedence over module bindings. Among modules, **last registered wins**.
 If no binding matches at all, DIBox can fall back to using the requested type as its own factory — this is what makes `await box.provide(SomeService)` work without an explicit `box.bind(SomeService)`. The missing-binding policy controls whether that fallback is available at the request root and for transitive dependencies. See [Missing-Binding Policy](#missing-binding-policy).
 
 ## Why use DIBox?
-### The Power of Auto-Wiring
-Dependency Injection (DI) decouples your high-level business logic from low-level implementation details (like database drivers or API clients). This makes your code modular and effortless to test—you can easily swap a real database for a mock during unit tests.
+### Infer construction, declare intent
 
-However, traditional DI often trades one problem for another: Dependency Hell. You end up writing hundreds of lines of "glue code" just to instantiate your service graph.
+Constructor annotations often contain the complete recipe for building a concrete service. Requiring a registration that merely repeats that recipe adds boilerplate and couples the composition root to every internal class.
 
-DIBox's standout feature is its ability to automatically resolve and inject dependencies based on type hints. It inspects your classes, sees what they need, and assembles the puzzle for you. You stop writing factories and start writing features.
+When no binding matches, DIBox can derive an implicit self-binding: the requested class becomes its own factory, and its annotated dependencies are resolved recursively. Explicit bindings remain focused on decisions that type hints cannot express — configured values, implementation choices, named variants, custom factories, and accepted request roots.
+
+This inference is governed rather than unconditional. The missing-binding policy independently controls which roots and transitive dependencies DIBox may construct, from an open zero-configuration default to explicit roots and allowlisted internals. The combination of inferred construction and explicit boundaries keeps small graphs simple without giving up control as an application grows.
 
 ### Comparison with Other Frameworks
-There are many great DI frameworks for Python out there. Here is why you might choose DIBox:
-- **vs. Manual Dependency Injection**
-  - **The Problem:** Manually instantiating services (Service(Database(Config()))) works for small scripts but becomes tedious and error-prone as your app grows.
-  - **The DIBox Way:**  DIBox eliminates boilerplate factory code by auto-wiring based on type hints. You write less glue code and focus on your business logic.
+Python has several excellent dependency-injection tools with different priorities. This is a high-level orientation, not a feature benchmark. These projects evolve, so details may become outdated or contain mistakes; consult the linked documentation when choosing a library, and please report corrections.
 
-- **vs. [dependency-injector](https://python-dependency-injector.ets-labs.org/)**
-  - **The Approach:** Dependency Injector is a powerful, feature-rich framework that uses a declarative style. You explicitly define Container classes and Providers for every component.
-  - **The DIBox Difference:** DIBox takes a more implicit, convention-over-configuration approach. You rarely need to define explicit providers—most wiring is automatic based on type hints. This makes it particularly seamless when integrating Third-Party SDKs (like Azure SDK or Boto3). You can simply bind an abstract class (e.g., TokenCredential) to a concrete instance, and DIBox automatically injects it into the SDK client's constructor without needing wrapper classes or complex factory providers.
+- **Manual dependency injection** keeps construction explicit and introduces no framework dependency. It is often the clearest choice for small graphs. DIBox becomes useful when recursive assembly, repeated composition, and resource lifecycle coordination start adding glue code.
 
-- **vs. [Injector](https://injector.readthedocs.io/en/latest/)**
-    - **The Approach:** Injector encourages a structured configuration style using explicit **Module** classes and **Provider** methods. While it supports type hints, it often relies on the `@inject` decorator to explicitly mark constructors for injection—particularly when you need to mix injectable and non-injectable arguments or when auto_bind is disabled.
-    - **The DIBox Difference:** DIBox favors a zero-boilerplate approach. It does not require separate Module definitions to wire your graph; it defaults to auto-wiring based on existing type hints. For lifecycle concerns, DIBox automatically detects common async/sync resource hooks (`__aenter__`/`__aexit__`, `start()`/`close()`, context managers) and runs them for you. Injector provides lifecycle and scoping control through its own mechanisms and explicit patterns; DIBox emphasizes convention and automatic detection for asynchronous workloads.
+- **[Dependency Injector](https://python-dependency-injector.ets-labs.org/)** uses explicit containers and providers, with extensive support for configuration, overrides, resources, asynchronous providers, and application wiring. DIBox instead derives eligible concrete bindings from constructor annotations, allowing applications to reserve explicit bindings for choices and boundaries that annotations cannot express.
 
-- **vs. [Punq](https://bobthemighty.github.io/punq/)**
-    - **The Approach:** Punq is a minimalistic DI container that shares our philosophy of simplicity and auto-wiring. It relies heavily on explicit bindings and does not support advanced features like async lifecycle management or predicate-based bindings.
-    - **The DIBox Difference:** DIBox adds async lifecycle management and a few more binding patterns while keeping the same “type-hints-first” feel.
+- **[Injector](https://injector.readthedocs.io/en/latest/)** is a Pythonic, Guice-inspired container with transitive injection, modules, scopes, provider methods, and optional automatic binding of missing types. Regular constructors use `@inject` or `Inject[...]` to identify injectable parameters, while provider callables infer annotated parameters. DIBox does not require markers on constructors and centers async resource lifecycle and missing-binding authorization in the container.
 
-- **vs. [Dishka](https://dishka.readthedocs.io/en/latest/)**
-  - **The Approach:** Dishka is a powerful DI framework built around a first-class scoping system and explicit `Provider` classes. This gives you fine-grained control over dependency lifetimes and structure, with ready-made integrations for many popular frameworks.
-  - **The DIBox Difference:** DIBox offers a simpler, more minimal API. Instead of `Provider` classes, DIBox auto-wires any class with a type-annotated constructor, so you only bind what can't be inferred (e.g., interfaces, raw values). This convention-over-configuration approach reduces boilerplate for common cases. DIBox also offers unique features like predicate-based binding and named-argument injection. However, Dishka currently has a more mature feature set, including a robust scoping model and a dependency graph visualizer. If those features are critical for your project right now, Dishka is an excellent choice. Scopes are on the DIBox roadmap.
+- **[Punq](https://punq.readthedocs.io/en/latest/)** is intentionally small and unintrusive, with constructor injection, explicit registration, transient and singleton scopes, and no decorators or global state. DIBox shares the emphasis on ordinary Python classes while adding async lifecycle management, named and predicate bindings, and policy-governed implicit self-binding.
 
-- **vs. [FastAPI's Depends](https://fastapi.tiangolo.com/tutorial/dependencies/)**
-  - **The Approach:** FastAPI revolutionized Python development with its intuitive, type-hint-based dependency injection. It is the primary inspiration behind DIBox. FastAPI's dependency injection system is tightly integrated with its web framework. It uses the `Depends` marker to declare dependencies in path operation functions.
-  - **The DIBox Difference:** While FastAPI's DI is excellent for web applications, DIBox is a standalone framework that can be used across any Python application. It extends the same principles to a broader context, including CLI apps, serverless functions, and background services. DIBox also adds advanced features like async lifecycle management and predicate-based bindings that go beyond FastAPI's capabilities.
+- **[Dishka](https://dishka.readthedocs.io/en/stable/)** provides first-class scopes, finalization, modular providers, validation, dependency-graph plotting, and integrations with many frameworks. It is a strong choice when rich lifetime modeling and ecosystem integrations are priorities. DIBox takes a smaller constructor-driven approach in which the missing-binding policy can infer concrete internals without provider declarations for each class.
+
+#### Inspiration: FastAPI
+
+[FastAPI](https://fastapi.tiangolo.com/) is a web framework rather than a standalone DI library, but its broader design was the primary inspiration for DIBox: define an endpoint as an ordinary function, describe what it needs through its signature and type hints, and let the framework handle the surrounding plumbing.
+
+DIBox applies the same idea to object construction. Constructors and factories describe their dependencies through ordinary Python signatures, while the container assembles the graph and manages resource lifecycles. This brings FastAPI's signature-driven developer experience to an application-neutral container for web handlers, workers, CLIs, and other entrypoints — including applications built with FastAPI.
 
 ## Contributing
 The project is in early stages, and contributions are welcome! Please contact me (Alex Z.) via [GitHub issues](https://github.com/mxAlexZ/dibox/issues), [LinkedIn](https://www.linkedin.com/in/alex-zee/) or [email](mailto:alex.zee@outlook.cz) for any questions, suggestions, or contributions.
