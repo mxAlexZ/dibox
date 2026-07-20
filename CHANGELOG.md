@@ -1,3 +1,18 @@
+## v0.1.14 (2026-07-20)
+### <!-- 0 -->🚀 Features & Enhancements
+- Support multi-argument bindings in bind_many (via tupples)
+- Implicit creation policy supporting custom rules; use value types guard as default
+- Retire zero-dep guard and strict resolution modes in favor of missing binding policy
+
+### <!-- 1 -->🐛 Bug Fixes
+- Typechecking errors for predicates with unknown types (like lambdas)
+
+### <!-- 3 -->📚 Documentation
+- Update README.md - intro, examples and improved comparison with other frameworks
+
+### <!-- 7 -->🛠️ Under the hood
+- Refine ADR skill with stricter and more clear rules with self-review.
+
 ## v0.1.13 (2026-06-16)
 ### <!-- 0 -->🚀 Features & Enhancements
 - Support custom names and better default string representation for bindings
