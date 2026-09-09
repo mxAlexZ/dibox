@@ -292,3 +292,107 @@ The key insight from the pipeline examples: scopes aren't about "request" vs "se
 - [dependency-injector Wiring](https://python-dependency-injector.ets-labs.org/wiring.html)
 - [FastAPI Dependency Injection](https://fastapi.tiangolo.com/tutorial/dependencies/)
 - [.NET Dependency Injection Lifetimes](https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection#service-lifetimes)
+
+
+## Revisit
+
+High-level direction for the open problems above, deliberately short of a spec. Naming and exact signatures are placeholders.
+
+### Resolution and placement order
+
+Delegating a request to an ancestor must rebase its entire dependency subtree onto that ancestor — a parent-owned service can never end up depending on a child's shadowed binding, since the child would then own something the parent's teardown never sees. That forces a two-step rule: look up the container hierarchy for the nearest explicit binding or existing instance; if one is found, that container owns resolution for the rest of the subtree, even though the request entered lower down. If nothing is explicitly bound anywhere, implicit creation is evaluated and placed in the container that owns the current subtree, and never searched further up the hierarchy for a container with a more permissive policy.
+
+The reason to reject upward search for implicit placement: it makes placement depend on whichever container happens to resolve the type first, silently, for every later resolution. Restricting cross-container sharing to explicit bindings removes that order dependence, and keeps the missing-binding policy doing only authorization, never lifetime choice — consistent with the policy's existing boundary in [missing_binding_policy.md](./missing_binding_policy.md).
+
+```python
+app = DIBox()
+app.bind(Database, create_database)   # explicit binding, owned by app
+
+async with DIBox(parent=app) as session:
+    # Cache has no binding anywhere. It is created implicitly and owned by
+    # `session`, the container that needed it - it never floats up to app.
+    cache = await session.provide(Cache)
+
+    # Database is explicitly bound on `app`. The request is rebased onto
+    # app for the rest of its subtree: if Database itself depends on an
+    # unbound ConnectionPool, that pool is also created and owned by app,
+    # never by session - even though the request started in session.
+    db = await session.provide(Database)
+```
+
+### Scope: a deferred, entered-later container definition
+
+Container nesting covers boundaries defined by a lexical `async with` block. Several real cases need a boundary that starts and ends across unrelated calls with no enclosing block — a UI session beginning at login and ending at logout somewhere else entirely. A scope is a named, importable, deferred container definition (bindings, policy) activated once at a later point and exited later still. Five constructs follow from that, each solving one part:
+
+- Single activation. A scope is imported by name at every call site rather than created per user or request, so it cannot represent concurrent activations of the same kind — a deliberate trade, not an oversight (see "Left open").
+- Atomic activation. A freshly created container is resolvable the moment it exists, so binding per-activation input (e.g. a session identity) after creation is a race. Seeding must happen through a function that receives the fresh container, is the only place allowed to bind into it, and runs before the first resolution and before activation returns — see the typed sketch below for making this statically checked too.
+- One eager-entry function, not a callback registry. Its parameters are autowired like any request and simultaneously declare what must be running while the scope is active — the same shape as an ASGI lifespan: a generator, setup before yield, teardown after. Composing several concerns (attaching UI controllers, starting a refresh task) is then ordinary dependency composition rather than a plural hook API, and nothing starts just because a module was imported — only what this function transitively depends on does.
+- No-argument exit. The common flow that ends a scope (logout, quit) has no container in hand and shouldn't need one; a lexical flow can still close the container returned by activation directly. Re-entering an active scope should fail rather than silently replace it and leak resources; exiting an inactive one should be a no-op.
+- Per-call ambient resolution. Resolving at decoration time would capture a container from before the scope was ever active. Falling back to an outer container when inactive would let scope-local types get implicitly created in the wrong place under an open policy — the same order-dependent placement problem as above, one level up — so an inactive scope should raise instead.
+
+#### Illustrative sketches
+
+All names below are placeholders. First, a typed variant where activation itself is statically checked. `wiring.py` is written once, at import time, and is the only file that imports `DIBox`:
+
+```python
+# wiring.py
+session_scope = create_scope(parent=app)
+session_scope.bind(FancyService)   # ordinary bindings, resolved once active
+
+@session_scope.opener
+def open_session(box: DIBox, info: SessionInfo, workspace: Workspace) -> None:
+    # The only place allowed to bind into the fresh container. Runs before
+    # anything is resolved from it. The decorator strips `box` from the
+    # signature it hands back, so the call site below is fully type-checked
+    # against `info` and `workspace` only.
+    box.bind(SessionInfo, info)
+    box.bind(Workspace, workspace)
+
+@session_scope.lifecycle
+def run_session(fancy: FancyService) -> Iterator[None]:
+    # `fancy` is autowired like any request. Declaring it here is also what
+    # starts it: this function's parameters are the scope's eager-start
+    # list, and its post-yield half is the teardown - same shape as an
+    # ASGI lifespan.
+    ui.attach(fancy)
+    yield
+    ui.reset_to_login()
+```
+
+```python
+# login.py - the only DI vocabulary visible here is a function name
+from wiring import open_session, session_scope
+# instead of direct import we could use callbacks, we just demonstrate the straightforward approach here
+
+async def on_login_ok(info: SessionInfo, workspace: Workspace) -> None:
+    await open_session(info, workspace)   # wrong types or arity: a type error
+
+async def on_logout() -> None:
+    await session_scope.exit()   # no container to fetch or pass back
+
+@session_scope.inject
+async def show_dashboard(fancy: Injected[FancyService]) -> None:
+    # resolved from whichever activation is current; raises if the scope
+    # has not been entered (e.g. called before login)
+    ...
+```
+
+Second, a looser variant without a declared opener, for cases where seeding is dynamic rather than fixed at import time. It skips the static check on the activation call in exchange for not having to declare anything ahead of time:
+
+```python
+async def on_login_ok(info: SessionInfo, workspace: Workspace) -> None:
+    await session_scope.open(setup=lambda box: (
+        box.bind(SessionInfo, info),
+        box.bind(Workspace, workspace),
+    ))
+```
+
+### Non-invasiveness
+
+DI touches should stay at entry points; business logic should not import the container or call `bind`/`provide` itself. Runtime object creation inside business logic is a related but separate problem, likely solved by an injected factory rather than container access, and is being explored independently — see [factories.md](./factories.md), currently an unreviewed sketch and not a resolved answer.
+
+### Left open
+
+- Concurrent activations of the same scope (e.g. many simultaneous user sessions) need a different mechanism than the single-active-instance model above, likely composed from nested `DIBox(parent=...)` plus explicit container selection. The name chosen for the one-at-a-time construct should leave room for a future concurrent primitive to be the one called a "scope".
+- Whether seeds should be a declared, statically checked part of a scope, enabling a future `validate()` over scope-local bindings, or remain a purely runtime concern handled through the seeding function.
+- In-flight work across exit is not tracked or prevented: closing a scope while something it started (e.g. a background task) is still running is a caller responsibility. A resource owned by an eager entry can cancel its own work in its teardown, but DIBox does not enforce this.
