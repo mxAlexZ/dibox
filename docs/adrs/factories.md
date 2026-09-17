@@ -2,7 +2,7 @@
 
 Status: Wild draft idea
 
-Currently, factory functions can only accept created type parameter. If we extend them to be able to accept other arguments that were passed to the function (in analogy with the idea of dynamic container selection in @inject decorator), we can open up new possibilities that allow more dynamic and context-aware factory functions probably making scopes less necessary.
+Currently, factory functions can only accept created type parameter. If we extend them to be able to accept other arguments that were passed to the function (in analogy with the idea of dynamic container selection in @inject decorator), we can open up new possibilities that allow more dynamic and context-aware factory functions, probably making some nested lifetimes in [scopes.md](scopes.md) less necessary.
 
 ```python
 async def user_factory(user_id: int, box: DIBox) -> User:

@@ -5,7 +5,7 @@ Status: implemented
 Related decisions:
 - [Missing-Binding Policy](./missing_binding_policy.md): decides when this mechanism may be used after binding lookup fails.
 - [Dependency Graphs](./dependency_graph.md): owns binding lookup, constructor inspection, recursive graph compilation, and caching.
-- [Scopes](./scopes.md): owns the unresolved placement of implicitly created instances across nested containers.
+- [Container nesting](./container_nesting.md): owns placement of implicitly created instances across nested containers.
 
 ## Problem
 

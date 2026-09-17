@@ -65,7 +65,7 @@ This removes the pass-through factory from the umbrella issue entirely — `Dash
 ### Alternatives considered
 
 - Per-binding argument overrides: `bind(Dashboard, args={"widgets": build_widgets})`. Solves the boilerplate but uses string keys and describes the *consumer* rather than the dependency.
-- Child/scoped containers: overrides by construction instead of declaration. Overlaps heavily — worth deciding whether both should exist.
+- Child/nested containers: overrides by construction instead of declaration. Overlaps heavily with nested `DIBox(parent=...)` in [container_nesting.md](container_nesting.md) — worth deciding whether both should exist.
 
 ---
 
@@ -92,7 +92,7 @@ Consequences:
 - A global binding wins for every consumer → all requests collapse to one cache entry. Singleton semantics are unchanged.
 - A contextual binding wins → the key includes that binding's condition, so it gets its own instance.
 
-This makes *"singleton unless you deliberately scoped it"* a property the implementation guarantees, rather than a convention users must avoid violating. It also means the cache does not fragment just because a type has many consumers.
+This makes "singleton unless you deliberately nested it" a property the implementation guarantees, rather than a convention users must avoid violating. It also means the cache does not fragment just because a type has many consumers. Nested lifetime ownership is proposed in [container_nesting.md](container_nesting.md).
 
 Worth doing on its own merits — the current key is a special case of this one.
 

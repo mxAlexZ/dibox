@@ -7,7 +7,7 @@ Related documents:
 - [Dependency Graphs](./dependency_graph.md): owns binding lookup, graph compilation, caching, and policy integration.
 - [Entrypoints](./entrypoints.md): owns the container surfaces that initiate root requests.
 - [Diagnostics and Introspection](./diagnostics.md): uses explicit roots and policy denials for validation and failure context.
-- [Scopes](./scopes.md): owns the unresolved placement and inheritance questions for implicitly created instances in nested containers.
+- [Container nesting](./container_nesting.md): owns placement and policy inheritance for implicitly created instances in nested containers.
 
 ## Context and problem
 
@@ -133,7 +133,7 @@ Predicate bindings intentionally count as explicit bindings and may therefore au
 
 ## Adjacent decisions
 
-Nested containers add a separate placement question. Type hints infer a construction recipe, and this policy authorizes ownership, but neither says which container lifetime should own an implicitly created instance. Policy locality, inheritance, and placement remain scope decisions constrained by the rule that a dependency must live at least as long as its dependent.
+Nested containers add a separate placement question. Type hints infer a construction recipe, and this policy authorizes ownership, but neither says which container lifetime should own an implicitly created instance. Policy locality, inheritance, and placement are nesting decisions in [container_nesting.md](./container_nesting.md), constrained by the rule that a dependency must live at least as long as its dependent.
 
 ## Superseded model
 

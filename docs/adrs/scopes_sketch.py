@@ -2,17 +2,24 @@
 """
 Scopes skeleton: thinking as a user, not a library author.
 
-Three scenarios where scoped dependencies emerge naturally in non-web apps:
+Three scenarios where nested lifetimes emerge naturally in non-web apps:
   1. Data processing pipeline (primary example, fully fleshed out)
      1-E. Same pipeline on Ray — tests the serialization boundary
+        (cross-process blueprint evidence: no live parent can cross;
+         a BindingBox / future blueprint rebuilds the container from config)
   2. Multi-tenant batch processor (brief sketch)
   3. Plugin-based CLI tool (brief sketch)
 
-Key design thesis demonstrated here:
-  - Container nesting IS the scope mechanism. No separate scope= declaration needed.
-  - Where you bind determines the scope. Bind to app → app-lived. Bind to job → job-lived.
-  - `async with DIBox(parent=...)` is both scope entry AND lifecycle boundary.
-  - The missing connector (resolver / contextvar) is what makes @inject work across scopes.
+Design thesis demonstrated here (see docs/adrs/scopes.md for the split):
+  - Container nesting is the lexical lifetime primitive. No scope= on bind().
+    See docs/adrs/container_nesting.md.
+  - Where you bind determines the lifetime. Bind to app → app-lived. Bind to job → job-lived.
+  - `async with DIBox(parent=...)` is both the boundary and the lifecycle manager.
+  - Contextvar @inject finds the innermost active box (entrypoints.md). A seat is a
+    different mechanism: occupancy when enter and exit are different calls
+    (session_lifetime.md). Not shown in these scenarios.
+  - Repeating container construction (especially in another process) is a blueprint,
+    not nesting. See container_blueprints.md; Ray 1-E is the evidence.
 
 This file is a user-perspective wishlist. Comments mark what exists today vs. what's proposed.
 """
@@ -413,6 +420,9 @@ async def approach_d_modules():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # SCENARIO 1-E: Same pipeline, but stages run on Ray workers
 #
+# Cross-process blueprint evidence (docs/adrs/container_blueprints.md).
+# Nesting cannot cross the serialization boundary; a container preset can.
+#
 # Ray breaks the single-process assumption. You can't pass a DIBox, a
 # StorageClient, or a GPUContext across the serialization boundary.
 # What CAN cross: dataclasses, plain dicts, bytes — i.e. config and data.
@@ -422,9 +432,9 @@ async def approach_d_modules():
 #   orchestrator (driver)  → owns app container, coordinates pipeline
 #   worker (Ray task/actor) → creates its OWN container from config, owns its resources
 #
-# Key insight: binding modules become the contract between driver and worker.
-# The driver says "run this stage with this config"; the worker uses the
-# module to set up its own container, does the work, tears it down.
+# Key insight: binding modules (and a future blueprint) are the contract
+# between driver and worker. The driver says "run this stage with this config";
+# the worker uses the preset to set up its own container, does the work, tears it down.
 #
 # Does container nesting still work? Yes, but the parent-child relationship
 # is LOCAL to each process. The driver has app→run nesting; each worker
@@ -756,36 +766,40 @@ async def scenario_3_cli():
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # WHAT I (the user) WANT FROM DIBOX — ranked by importance
+# See docs/adrs/scopes.md (hub), container_nesting.md, container_blueprints.md,
+# session_lifetime.md, entrypoints.md.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #
 # 1. DIBox(parent=...) container nesting              — THE foundation
-#    Without this, nothing else works. This gives me scope boundaries
-#    and instance isolation with zero new concepts.
+#    Without this, nothing else works. This gives nested lifetime boundaries
+#    and instance isolation with zero new concepts. (container_nesting.md)
 #
 # 2. container.call(func, **explicit_args)            — eliminate provide() chains
 #    Greedy resolution: the container fills what it can, I pass the rest.
 #    This is the killer feature for pipeline code where I don't want @inject
-#    on internal helpers.
+#    on internal helpers. (entrypoints.md)
 #
 # 3. Contextvar-based @inject resolution              — for entry points
 #    Plain @inject resolves from "current container" (the innermost active
-#    `async with DIBox(...)`). This makes framework integration seamless
-#    and replaces the global_dibox singleton with something scope-aware.
+#    `async with DIBox(...)`). This makes framework integration seamless.
+#    (entrypoints.md) A seat is a different job: occupancy when login and
+#    logout are different calls (session_lifetime.md). Not needed here.
 #
-# 4. Binding modules (plain functions)                — reusable scope setup
-#    No base class, just `def setup(box): box.bind(...)`.
-#    Package common binding groups for reuse.
+# 4. Binding modules + container blueprints           — reusable construction
+#    BindingBox: repeat the bind list. Blueprint: create equivalent containers
+#    (parent, policy, per-container setup, lifecycle), including in another process (1-E).
+#    (binding_modules.md, container_blueprints.md)
 #
 # 5. container.validate() / container.visualize()     — debugging
 #    "Show me the dependency graph" and "tell me what's missing" are
-#    enormously valuable when nesting gets deep.
+#    enormously valuable when nesting gets deep. (diagnostics.md)
 #
 # ──────────────────────────────────────────────────────────────────────────────
 # WHAT I DON'T WANT (yet)
 # ──────────────────────────────────────────────────────────────────────────────
 #
 # - scope= parameter on bind(). It's redundant with container nesting.
-#   Where I bind IS the scope. Adding a parallel scope concept creates
+#   Where I bind IS the lifetime. Adding a parallel scope concept creates
 #   two ways to express the same thing and raises questions nobody has
 #   good answers to (who manages scope lifecycle? how do named scopes
 #   nest?). Container nesting already answers these questions structurally.
@@ -793,7 +807,11 @@ async def scenario_3_cli():
 # - Named/enumerated scopes (RequestScope, SessionScope, etc.)
 #   These are framework-specific vocabulary. A generic DI library should
 #   provide the primitive (nesting + lifecycle), not the vocabulary.
-#   If someone needs named scopes, they can name their binding modules.
+#   If someone needs a name, they can name a BindingBox or a blueprint.
+#
+# - Making a blueprint track one current container. The same definition can
+#   create concurrent containers, none inherently current. Tracking one across
+#   disconnected calls is a separate seat mechanism (session_lifetime.md).
 #
 # - Resolver stack / middleware chain on Injector
 #   Cool idea but premature. Single resolver (or contextvar default)

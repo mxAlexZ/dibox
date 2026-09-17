@@ -24,8 +24,11 @@ How the container resolves dependencies, manages instance lifetimes, and exposes
  - [implicit_self_binding.md](implicit_self_binding.md): constructor-derived self-bindings for unbound concrete classes; recursive annotated dependencies, explicit-binding precedence, and limits of inferred recipes
  - [missing_binding_policy.md](missing_binding_policy.md): canonical missing-binding authorization; root/transitive defaults, `"open"`/`"explicit-roots"`/`"closed"` presets, type/package/predicate rules, cached-boundary limitation
  - [entrypoints.md](entrypoints.md): implemented `@inject`, `Injected[T]`, contextvar and fixed-container selection; proposed `call()`/`partial()` reuse policy root semantics per parameter
- - [scopes.md](scopes.md): `DIBox(parent=...)` nesting as scope primitive, instance ownership/shadowing rules, binding modules inside scopes, contextvar-based `@inject`, why `scope=` on `bind()` was rejected; open problem: placement of implicitly created instances (binding = recipe + ownership + placement, lifetime invariant, candidate rules incl. container-local lean, policy locality/inheritance)
- - [scopes_sketch.py](scopes_sketch.py): pipeline/Ray scope scenarios, app-run-stage nesting, `container.call()`, module reuse
+ - [scopes.md](scopes.md): lifetime-problem hub; nesting vs blueprint vs seat and when each is needed; `scope=` / named enums / resolver stack rejected
+ - [container_nesting.md](container_nesting.md): proposed `DIBox(parent=...)`; close-order constraint, explicit binding ownership, container-local implicit placement
+ - [container_blueprints.md](container_blueprints.md): proposed reusable container definitions beyond `BindingBox`; synchronous per-container setup, async lifecycle orchestration, cross-process reuse
+ - [session_lifetime.md](session_lifetime.md): proposed seat (non-lexical occupancy); kept off the blueprint; `@session.inject` in question; occupancy policy open
+ - [scopes_sketch.py](scopes_sketch.py): pipeline/Ray/tenant/CLI scenarios; lexical nesting evidence; Ray section as cross-process blueprint evidence
  - [factories.md](factories.md): proposal for call-time factory args and container-aware factories for dynamic/context-driven dependency creation
  - [sync_async.md](sync_async.md): sync mode current limitation (`get()` only), proposed `provide_sync()` and sync factory behavior
 

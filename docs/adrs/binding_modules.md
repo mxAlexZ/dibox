@@ -56,5 +56,6 @@ auto-binding helpers, and module-aware `validate()` / `graph()` output.
 ## Related ADRs
 
 - [diagnostics.md](diagnostics.md): owns binding-source attribution, `validate()` / `graph()`, and future module-level dependency analysis.
-- [scopes.md](scopes.md): owns lifetime boundaries; binding modules can be added inside a scope but do not define the scope.
+- [container_nesting.md](container_nesting.md): owns nested lifetime boundaries; binding modules can be added inside a nested container but do not define the lifetime.
+- [container_blueprints.md](container_blueprints.md): a blueprint produces live containers (parent, policy, per-container setup, lifecycle); `BindingBox` only holds rules poured into a live box.
 - [package_binding.md](package_binding.md): owns package scanning and auto-self-binding as a convenience for building `BindingBox` instances.

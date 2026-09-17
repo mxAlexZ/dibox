@@ -4,7 +4,7 @@ Status: partially implemented
 
 Related ADRs:
 - [diagnostics.md](diagnostics.md): `validate()` and `graph()` are the primary consumer APIs this design enables
-- [scopes.md](scopes.md): scope boundaries are the natural candidate for graph reuse boundaries if sharing is ever introduced
+- [container_nesting.md](container_nesting.md): nested lifetime boundaries are the natural candidate for graph reuse if sharing is ever introduced
 - [implicit_self_binding.md](implicit_self_binding.md): defines the constructor-derived binding mechanism used when lookup finds no explicit binding
 - [missing_binding_policy.md](missing_binding_policy.md): authorizes missing bindings at root and transitive positions, including the known cached-boundary limitation
 - [entrypoints.md](entrypoints.md): `container.call()` needs dependency traversal as a dry-run probe to know which arguments are resolvable
@@ -27,8 +27,8 @@ On an uncached miss, graph construction identifies whether the request is a root
 
 Two traversal behaviors are planned over the same resolution rules. Fail-fast should stop at the first missing or unbindable dependency (for provisioning and resolvability probes), while collect-all should continue and return a complete error set (for validation and graph inspection).
 
-Graph sharing remains exploratory. Runtime already reuses materialised instances aggressively, so sharing resolution metadata is not automatically the highest-value optimization. The main open design question is composition ergonomics across scopes, so concrete sharing mechanics are deferred until scope boundaries and ownership rules are defined more explicitly.
+Graph sharing remains exploratory. Runtime already reuses materialised instances aggressively, so sharing resolution metadata is not automatically the highest-value optimization. The main open design question is composition ergonomics across nested containers, so concrete sharing mechanics are deferred until nesting ownership rules in [container_nesting.md](container_nesting.md) are locked.
 
 ## Open questions
-- Should graph reuse be a public concept at all, or remain an internal optimization behind container/scope composition APIs?
-- Which boundary should own reuse semantics: parent-container inheritance, reusable container templates, or another composition primitive?
+- Should graph reuse be a public concept at all, or remain an internal optimization behind nested-container composition APIs?
+- Which boundary should own reuse semantics: parent-container inheritance, reusable container blueprints ([container_blueprints.md](container_blueprints.md)), or another composition primitive?
