@@ -14,6 +14,21 @@ ADRs are most valuable when they store high-cost knowledge: rationale, trade-off
 
 They are least valuable when they duplicate low-cost knowledge that can be read directly from source code. In that sense, ADR quality is not about volume. It is about preserving context that lowers future decision cost.
 
+## What a reader needs
+
+A reader arrives with a decision in hand — implementing, reviewing, or extending a feature — and must leave able to answer four questions: what problem, what was decided, what constrains it, what is still open.
+
+Sections earn their place by answering one of those. A true statement that does not help a reader decide is not decision context.
+
+## Dispositions of an idea
+
+An idea in an ADR has one of four dispositions.
+
+- Active: it is the current decision, or an open question that still drives work.
+- Parked: it was separated or deferred and may return. Record it as parked, with a link to the document that owns it. Separation is not rejection.
+- Rejected: someone would plausibly propose it again, so the reason it was refused still guides a future decision.
+- Nothing: a step in the reasoning that produced the decision. A discarded intermediate name, a sketch API, a contrast that was useful in conversation. It is not a rejected alternative, and it is not recorded at all.
+
 ## Why this ecosystem improves delivery
 
 The ADR ecosystem creates leverage in four areas:
@@ -70,12 +85,14 @@ This is not a rewrite cycle. The goal is to keep architectural intent accurate w
 
 ## Why maintenance matters
 
-ADR maintenance is a trust mechanism, not clerical work. Without it, three failure modes accumulate.
+ADR maintenance is a trust mechanism, not clerical work. Without it, four failure modes accumulate.
 
 The first is ambiguity about maturity. Without explicit status, readers cannot tell whether a document is an early brainstorm or settled context, and treat exploration as policy or dismiss decisions as unresolved. Marking status resolves this.
 
 The second is drift. As code evolves, outdated claims linger uncorrected and the ADR layer gradually diverges from implementation reality. Keeping claims source-verifiable prevents this, so the context layer stays auditable rather than becoming narrative fiction.
 
 The third is retrieval failure. ADR value is only realized if the right document can be found under time pressure. Dense, searchable index descriptions make targeted retrieval possible for both humans and AI working under context-window constraints.
+
+The fourth is accretion. Documents grow by accumulating traces of the conversations that produced them — discarded intermediate names, leftover open questions, sections that re-explain a neighbour. Those traces feel like knowledge because they were hard to produce; they do not lower future decision cost. A section that cannot name the reader question it answers is accretion, not context.
 
 Together these practices keep ADRs decision-useful rather than turning them into static historical artifacts.

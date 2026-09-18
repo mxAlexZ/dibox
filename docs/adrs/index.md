@@ -8,7 +8,7 @@ See [adr_concept.md](adr_concept.md) for ADR purpose and lifecycle; see reposito
 
 ## Meta
 ADRs that define the ecosystem and guiding principles. Read first when onboarding or before writing new ADRs.
- - [adr_concept.md](adr_concept.md): why ADRs exist, information economics, delivery leverage, lifecycle stages, and why maintenance matters
+ - [adr_concept.md](adr_concept.md): why ADRs exist, information economics, reader questions, idea dispositions (active / parked / rejected / nothing), lifecycle stages, accretion as a maintenance failure
  - [philosophy.md](philosophy.md): progressive disclosure of complexity — zero-config defaults with explicit advanced controls
  - [ideas.md](ideas.md): active roadmap (test module composition helpers, dependency graph introspection, startup initialization), deferred proposals (named binding modules, resolver args, non-destructive signature mode), archived decisions
 

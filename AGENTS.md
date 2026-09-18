@@ -12,7 +12,7 @@ Design principle: Progressive Disclosure of Complexity — zero-config defaults 
 - Before changes touching more than one function/class, or with multiple reasonable approaches: present a plan and wait for approval.
 - Docstrings: Google style, concise, non-obvious. Skip for self-explanatory functions.
 - Clarity over hyperbole. Engineering jokes welcome when relevant.
-- Markdown: concise, minimal formatting (no excessive bolding/tables), readable without rendering.
+- Markdown: concise, readable without rendering. Plain text over bold/italic; tables become bullets; nesting depth at most two.
 
 ## Tools
 - Tests: `uv run pytest`
@@ -23,7 +23,7 @@ For non-trivial tasks — feature work, design changes, questions, or anything t
 - Start from `docs/adrs/index.md`; Use index summaries to read 2-4 most relevant ADRs; expand reads only if open questions remain.
 - Treat source code as implementation truth; treat ADRs as rationale and design intent.
 - If ADR and code diverge, call it out and propose minimal updates.
-- When writing or updating ADRs, use the `update-adr` skill.
+- When writing, updating, condensing, or restructuring ADRs, use the `update-adr` skill.
 
 ## Documentation
 - `README.md`: public-facing intro and usage examples.
